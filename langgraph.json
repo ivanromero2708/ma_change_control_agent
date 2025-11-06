@@ -1,0 +1,8 @@
+{
+    "python_version": "3.11",
+    "dependencies": ["."],
+    "graphs": {
+      "am_change_control": "./src/graph/builder.py:am_change_control_agent"
+    },
+    "env": ".env"
+}
