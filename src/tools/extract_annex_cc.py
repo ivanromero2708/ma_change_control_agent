@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pydantic import BaseModel, Field
 from typing import Annotated, Dict, List, Literal, Optional, Type, Union, Any
@@ -45,7 +46,7 @@ structured_extraction_prompts = {
 extraction_models = {
     "change_control": ChangeControlModel,
     "side_by_side": SideBySideModel,
-    "reference_methods": ExtractionModel,
+    "reference_methods": MetodoAnaliticoDA,
 }
 
 filenames = {
@@ -211,7 +212,7 @@ def process_document(
     max_pages_per_chunk: int = 8,
     chunk_overlap_pages: int = 2,
 ) -> list:
-    """Process PDF with automatic chunking if needed."""
+    """Process PDF with automatic chunking if needed. Uses parallel chunk annotation for long docs."""
     total_pages = get_pdf_page_count(pdf_path)
     logger.info(f"Processing PDF {pdf_path} with {total_pages} pages")
     if total_pages == 0:
@@ -229,14 +230,34 @@ def process_document(
         max_pages_per_chunk=max_pages_per_chunk,
         chunk_overlap_pages=chunk_overlap_pages,
     )
-    results = []
+    if not chunk_files:
+        return []
+
+    indexed_results: list[tuple[int, Any]] = []
     
     try:
-        for i, chunk_file in enumerate(chunk_files):
-            logger.info(f"Processing chunk {i+1}/{len(chunk_files)}")
-            result = process_chunk(chunk_file, extraction_model, chunk_retry_backoff_seconds=5, chunk_retry_attempts=3)
-            if result:
-                results.append(result)
+        max_workers = max(1, min(4, len(chunk_files)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(
+                    process_chunk,
+                    chunk_file,
+                    extraction_model,
+                    5,
+                    3,
+                ): (idx, chunk_file)
+                for idx, chunk_file in enumerate(chunk_files)
+            }
+
+            for future in as_completed(future_map):
+                idx, chunk_file = future_map[future]
+                try:
+                    result = future.result()
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error(f"Error processing chunk {chunk_file}: {exc}")
+                    continue
+                if result:
+                    indexed_results.append((idx, result))
     finally:
         # Clean up temporary files
         for chunk_file in chunk_files:
@@ -245,7 +266,8 @@ def process_document(
             except Exception as e:
                 logger.warning(f"Could not delete temporary file {chunk_file}: {e}")
     
-    return results
+    indexed_results.sort(key=lambda item: item[0])
+    return [result for _, result in indexed_results]
 
 def _merge_list_items(target_list: list, source_list: list):
     """Mergea listas cuidando duplicados y combinando elementos dict similares."""

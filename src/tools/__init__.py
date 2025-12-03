@@ -4,6 +4,7 @@ from src.tools.consolidar_pruebas_procesadas import consolidar_pruebas_procesada
 from src.tools.extract_annex_cc import extract_annex_cc
 from src.tools.analyze_change_impact import analyze_change_impact
 from src.tools.apply_method_patch import apply_method_patch
+from src.tools.consolidate_new_method import consolidate_new_method
 from src.tools.consolidate_test_solution_structured import consolidate_test_solution_structured
 from src.tools.test_solution_structured_extraction import test_solution_structured_extraction
 from src.tools.test_solution_clean_markdown import test_solution_clean_markdown
@@ -16,6 +17,7 @@ __all__ = [
     "extract_annex_cc",
     "analyze_change_impact",
     "apply_method_patch",
+    "consolidate_new_method",
     "consolidate_test_solution_structured",
     "test_solution_structured_extraction",
     "test_solution_clean_markdown",

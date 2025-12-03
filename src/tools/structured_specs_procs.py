@@ -13,8 +13,8 @@ from langchain.chat_models import init_chat_model
 
 # Importaciones de tu proyecto (asumiendo que están correctas)
 from src.prompts.tool_prompts import *
-# Esto debe contener ExtractionModel (que ya incluye 'id_prueba: UUID')
-from src.models.extraction_models import * 
+# Esto debe contener MetodoAnaliticoDA (que ya incluye 'id_prueba: UUID')
+from src.models.analytical_method_models import * 
 from src.graph.state import DeepAgentState
 
 # --- Configuración ---
@@ -115,15 +115,15 @@ def structure_specs_procs(
                     }
                 )
     
-    if isinstance(legacy_method_payload, ExtractionModel):
+    if isinstance(legacy_method_payload, MetodoAnaliticoDA):
         legacy_method_obj = legacy_method_payload
     elif isinstance(legacy_method_payload, dict):
         try:
-            legacy_method_obj = ExtractionModel(**legacy_method_payload)
+            legacy_method_obj = MetodoAnaliticoDA(**legacy_method_payload)
         except ValidationError as exc:
             error_msg = (
                 "Error: No se pudo reconstruir '/legacy/legacy_method.json' como"
-                f" ExtractionModel. Detalle: {exc}"
+                f" MetodoAnaliticoDA. Detalle: {exc}"
             )
             logger.error(error_msg)
             return Command(
@@ -134,11 +134,11 @@ def structure_specs_procs(
     elif isinstance(legacy_method_payload, str):
         try:
             parsed_payload = json.loads(legacy_method_payload)
-            legacy_method_obj = ExtractionModel(**parsed_payload)
+            legacy_method_obj = MetodoAnaliticoDA(**parsed_payload)
         except (json.JSONDecodeError, ValidationError) as exc:
             error_msg = (
                 "Error: No se pudo interpretar el contenido de '/legacy/legacy_method.json'"
-                f" como JSON válido del modelo ExtractionModel. Detalle: {exc}"
+                f" como JSON válido del modelo MetodoAnaliticoDA. Detalle: {exc}"
             )
             logger.error(error_msg)
             return Command(
@@ -149,7 +149,7 @@ def structure_specs_procs(
     else:
         error_msg = (
             "Error: El contenido almacenado en '/legacy/legacy_method.json' no es un formato"
-            " compatible (dict o ExtractionModel)."
+            " compatible (dict o MetodoAnaliticoDA)."
         )
         logger.error(error_msg)
         return Command(

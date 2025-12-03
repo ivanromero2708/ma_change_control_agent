@@ -76,6 +76,10 @@ Esta es la regla más importante que debes seguir:
     * Tienes **PROHIBIDO** usar `read_file`, `write_file`, o `edit_file` para procesar datos pesados (como `legacy_method.json`). Ese es el trabajo de un subagente.
     * **EXCEPCIÓN:** Puedes usar `read_file` **únicamente** para leer archivos de *metadatos* o *planificación* muy pequeños (ej. `/legacy/summary_and_tests.json`) si lo necesitas para tu *siguiente* paso de delegación.
 
+## Regla de paralelismo obligatorio (Legacy / CC / Side-by-Side)
+- Si el usuario entrega más de uno de estos insumos principales (método legado, control de cambios, comparativo side-by-side), inicia todos los TODO relacionados en `in_progress` y lanza las tareas `task` en el **mismo turno**: `legacy_migration_agent`, `change_control_agent` y `side_by_side_agent` deben correr en paralelo siempre que estén disponibles sus archivos.
+- No esperes a que termine uno para iniciar los otros; coordina el seguimiento con `think_tool` y actualiza cada TODO al recibir su resultado.
+
 # 2. PLAYBOOK DE MIGRACIÓN (Tu Flujo de Trabajo)
 
 Debes seguir esta secuencia de pasos para CADA solicitud.
@@ -121,6 +125,7 @@ Usa un ciclo de `read_todos` -\> `task` -\> `think_tool` -\> `write_todos`. Sigu
 
   * **Agente a Llamar:** `subagent_type="legacy_migration_agent"`
   * **Descripción de la Tarea:** Pásale la ruta del archivo que te dio el usuario. El subagente se encargará *internamente* de todo su flujo (Extraer, Fan-Out, Fan-In, Consolidar), tal como lo define *su propio prompt*.
+  * **Paralelo:** Si también hay CC y/o Side-by-Side, lanza sus `task` correspondientes en el mismo turno para ejecutarlas en paralelo.
   * **Ejemplo de llamada `task`**:
     ```json
     {{
@@ -139,6 +144,7 @@ Usa un ciclo de `read_todos` -\> `task` -\> `think_tool` -\> `write_todos`. Sigu
 
   * **Agente a Llamar:** `subagent_type="change_control_agent"`
   * **Descripción de la Tarea:** Pásale la ruta al archivo de CC.
+  * **Paralelo:** Si también hay método legado y/o Side-by-Side, lanza las otras `task` en el mismo turno.
   * **Ejemplo de llamada `task`**:
     ```json
     {{
@@ -157,6 +163,7 @@ Usa un ciclo de `read_todos` -\> `task` -\> `think_tool` -\> `write_todos`. Sigu
 
   * **Agente a Llamar:** `subagent_type="side_by_side_agent"`
   * **Descripción de la Tarea:** Pásale la ruta al archivo de comparación.
+  * **Paralelo:** Si también hay método legado y/o CC, lanza las otras `task` en el mismo turno.
   * **Ejemplo de llamada `task`**:
     ```json
     {{
@@ -186,22 +193,22 @@ Usa un ciclo de `read_todos` -\> `task` -\> `think_tool` -\> `write_todos`. Sigu
 
 -----
 
-**CUANDO el TODO `in_progress` contiene "Implementar Cambios en el Método Nuevo":**
+**CUANDO el TODO `in_progress` contiene "Implementar Cambios en el Metodo Nuevo":**
 
-  * **Prerequisito:** Asegúrate de que ya existan `/new/new_method_final.json`, `/new/change_control.json` y cualquier archivo adicional relevante (`/new/side_by_side.json`, `/new/reference_methods.json`). Si falta alguno, vuelve a los pasos anteriores para completarlos.
+  * **Prerequisito:** Asegurate de que ya existan `/new/new_method_final.json`, `/new/change_control.json` y cualquier archivo adicional relevante (`/new/side_by_side.json`, `/new/reference_methods.json`, `/legacy/legacy_method.json`). Si falta alguno, vuelve a los pasos anteriores para completarlos.
   * **Agente a Llamar:** `subagent_type="change_implementation_agent"`
-  * **Descripción de la Tarea:** Pásale un resumen del contexto (qué documentos fueron procesados y qué se espera modificar). El subagente realizará el análisis de impacto y aplicará los parches siguiendo su prompt.
+  * **Descripcion de la Tarea:** Indica que ya estan listos los insumos. El subagente debe: 1) llamar `analyze_change_impact` para generar el plan, 2) ejecutar TODAS las llamadas `apply_method_patch` EN PARALELO (una por cada action_index), 3) consolidar con `consolidate_new_method`.
   * **Ejemplo de llamada `task`**:
     ```json
     {{
       "name": "task",
       "args": {{
-        "description": "Consolidar los cambios del CC y anexos sobre el método nuevo. Genera el plan de implementación y aplica los parches aprobados.",
+        "description": "Consolidar los cambios del CC y anexos sobre el metodo nuevo. Genera/actualiza el plan, aplica parches por accion y consolida el metodo final.",
         "subagent_type": "change_implementation_agent"
       }}
     }}
     ```
-  * **Al Terminar:** Revisa el mensaje del subagente y, si corresponde, inspecciona `/new/change_implementation_plan.json`, `/new/new_method_final.json` y `/logs/change_patch_log.jsonl`. Luego, marca el TODO como completado y continúa con QA o render según el plan.
+  * **Al Terminar:** Revisa el mensaje del subagente y, si corresponde, inspecciona `/new/change_implementation_plan.json`, `/new/applied_changes/`, `/new/new_method_final.json` y `/logs/change_patch_log.jsonl`. Si el metodo final aun no esta consolidado, pide ejecutar `consolidate_new_method`. Luego, marca el TODO como completado y continua con QA o render segun el plan.
 """
 
 

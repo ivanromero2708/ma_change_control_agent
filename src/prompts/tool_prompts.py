@@ -123,40 +123,37 @@ Analiza la información estructurada de control de cambios y genera un plan acci
 """
 
 APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
-  Genera y aplica el contenido completo de una prueba del plan de cambios usando la información del método nuevo,
-  side-by-side y métodos de referencia.
+  Genera y aplica el contenido completo de una prueba por accion del plan usando la informacion del metodo nuevo,
+  del metodo legado, del side-by-side y de los metodos de referencia.
   
-  ## Cuándo usar
-  - Después de obtener el plan en `/new/change_implementation_plan.json` mediante `analyze_change_impact`.
-  - Cuando necesites materializar **una** acción del plan (índice específico) ya sea para revisión (`dry_run=True`) o para
-    actualizar definitivamente `/new/new_method_final.json` (`dry_run=False`).
-  - Se espera que el sub-agente invoque esta herramienta en paralelo, una vez por cada acción pendiente.
+  ## Cuando usar
+  - Despues de obtener el plan en `/new/change_implementation_plan.json` mediante `analyze_change_impact`.
+  - Cuando necesites materializar **una** accion del plan (indice especifico) para actualizar `/new/new_method_final.json`.
+  - Cada llamada procesa una accion: editar, adicionar, eliminar o dejar igual. Ejecuta tantas llamadas como acciones existan.
   
-  ## Buenas Prácticas
+  ## Buenas Practicas
   - Proporciona siempre el `action_index` correcto; revisa el plan antes de llamar a la herramienta.
-  - Ejecuta primero con `dry_run=True` si deseas validar el contenido generado sin modificar el archivo final.
-  - Asegúrate de que los archivos de referencia (`side_by_side` y `reference_method`) estén cargados en el estado para
+  - Asegurate de que los archivos de referencia (`legacy_method`, `side_by_side` y `reference_method`) esten cargados en el estado para
     que el LLM disponga de contexto completo.
+  - La herramienta guarda el resultado en `/new/applied_changes/{action_index}.json` y actualiza `/new/new_method_final.json`.
   
-  ## Parámetros
+  ## Parametros
   - `plan_path (str)`: Ruta al plan generado por `analyze_change_impact`. Default `/new/change_implementation_plan.json`.
-  - `action_index (int)`: Índice (0-based) de la acción a ejecutar.
-  - `side_by_side_path (str)`: Ruta al JSON del análisis side-by-side. Default `/new/side_by_side.json`.
-  - `reference_method_path (str)`: Ruta al JSON de métodos de referencia. Default `/new/reference_method.json`.
-  - `new_method_path (str)`: Ruta al método consolidado que será modificado. Default `/new/new_method_final.json`.
-  - `dry_run (bool)`: Si es `True`, valida y reporta el resultado sin escribir archivos; `False` persiste los cambios.
+  - `action_index (int)`: Indice (0-based) de la accion a ejecutar.
+  - `side_by_side_path (str)`: Ruta al JSON del analisis side-by-side. Default `/new/side_by_side.json`.
+  - `reference_method_path (str)`: Ruta al JSON de metodos de referencia. Default `/new/reference_method.json`.
+  - `legacy_method_path (str)`: Ruta al metodo legado estructurado. Default `/legacy/legacy_method.json`.
+  - `new_method_path (str)`: Ruta al metodo consolidado que sera modificado. Default `/new/new_method_final.json`.
   
   ## Salida y Efectos en el Estado
-  - **Mensaje de Retorno (ToolMessage):** Indica si la prueba se generó/aplicó y resume notas del LLM.
-  - **Actualización del Estado:**
-    - `dry_run=True`: no se modifica `/new/new_method_final.json`; se usa solo para validación previa.
-    - `dry_run=False`: sobrescribe `/new/new_method_final.json` con la versión actualizada y registra la ejecución en
-      `/logs/change_patch_log.jsonl`.
+  - **Mensaje de Retorno (ToolMessage):** Indica si la prueba se genero/aplico y resume notas del LLM.
+  - **Actualizacion del Estado:** Sobrescribe `/new/new_method_final.json`, registra la ejecucion en `/logs/change_patch_log.jsonl`
+    y deja el parche individual en `/new/applied_changes/{action_index}.json`.
   
   ## Siguiente Paso Esperado
-  - Repetir la llamada con `dry_run=False` cuando el contenido generado sea aprobado.
-  - Continuar procesando los siguientes `action_index` hasta completar el plan y luego avanzar al render o revisiones SOP.
+  - Una vez procesadas todas las acciones, ejecutar `consolidate_new_method` para fusionar todos los parches en el metodo final a renderizar.
   """
+
 
 #############################################################################################################
 # LLMS CALLS INSIDE TOOLS
@@ -339,3 +336,24 @@ Extraer información específica que será insertada en el método analítico mo
 
 """
 
+
+
+CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION = """
+  Fusiona todos los parches individuales generados por `apply_method_patch` en un solo metodo final listo para renderizar.
+  
+  ## Cuando usar
+  - Despues de aplicar todas las acciones con `apply_method_patch`.
+  - Cuando necesites un unico JSON consistente para entregar o renderizar.
+  
+  ## Parametros
+  - `patches_dir (str)`: Directorio virtual donde se guardan los parches individuales. Default `/new/applied_changes`.
+  - `base_method_path (str)`: Ruta al metodo base sobre el que se aplicaran los parches. Default `/new/new_method_final.json`.
+  - `output_path (str)`: Ruta de salida del metodo consolidado. Default `/new/new_method_final.json`.
+  
+  ## Salida y Efectos en el Estado
+  - **Mensaje de Retorno (ToolMessage):** Resumen de parches leidos y aplicados.
+  - **Actualizacion del Estado:** Escribe el metodo consolidado en `output_path` con todos los cambios aplicados.
+  
+  ## Siguiente Paso Esperado
+  - Revisar el metodo consolidado (si es necesario) y proceder con el renderizado o pasos de QA.
+  """

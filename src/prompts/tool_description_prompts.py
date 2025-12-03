@@ -544,13 +544,11 @@ APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
   
   ## Cuándo usar
   - Después de obtener el plan en `/new/change_implementation_plan.json` mediante `analyze_change_impact`.
-  - Cuando necesites materializar **una** acción del plan (índice específico) ya sea para revisión (`dry_run=True`) o para
-    actualizar definitivamente `/new/new_method_final.json` (`dry_run=False`).
+  - Cuando necesites materializar **una** acción del plan (índice específico) para actualizar `/new/new_method_final.json`.
   - Se espera que el sub-agente invoque esta herramienta en paralelo, una vez por cada acción pendiente.
   
   ## Buenas Prácticas
   - Proporciona siempre el `action_index` correcto; revisa el plan antes de llamar a la herramienta.
-  - Ejecuta primero con `dry_run=True` si deseas validar el contenido generado sin modificar el archivo final.
   - Asegúrate de que los archivos de referencia (`side_by_side` y `reference_method`) estén cargados en el estado para
     que el LLM disponga de contexto completo.
   
@@ -560,17 +558,13 @@ APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
   - `side_by_side_path (str)`: Ruta al JSON del análisis side-by-side. Default `/new/side_by_side.json`.
   - `reference_method_path (str)`: Ruta al JSON de métodos de referencia. Default `/new/reference_method.json`.
   - `new_method_path (str)`: Ruta al método consolidado que será modificado. Default `/new/new_method_final.json`.
-  - `dry_run (bool)`: Si es `True`, valida y reporta el resultado sin escribir archivos; `False` persiste los cambios.
   
   ## Salida y Efectos en el Estado
   - **Mensaje de Retorno (ToolMessage):** Indica si la prueba se generó/aplicó y resume notas del LLM.
-  - **Actualización del Estado:**
-    - `dry_run=True`: no se modifica `/new/new_method_final.json`; se usa solo para validación previa.
-    - `dry_run=False`: sobrescribe `/new/new_method_final.json` con la versión actualizada y registra la ejecución en
-      `/logs/change_patch_log.jsonl`.
+  - **Actualización del Estado:** Sobrescribe `/new/new_method_final.json` con la versión actualizada y registra la ejecución en
+    `/logs/change_patch_log.jsonl`.
   
   ## Siguiente Paso Esperado
-  - Repetir la llamada con `dry_run=False` cuando el contenido generado sea aprobado.
   - Continuar procesando los siguientes `action_index` hasta completar el plan y luego avanzar al render o revisiones SOP.
   """
 

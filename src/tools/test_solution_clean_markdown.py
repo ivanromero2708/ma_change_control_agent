@@ -104,6 +104,29 @@ def _normalize_test_methods(test_methods_model: TestMethodsfromTOC) -> List[Dict
     return normalized
 
 
+def _filter_primary_test_methods(
+    test_methods: List[Dict[str, Optional[str]]]
+) -> List[Dict[str, Optional[str]]]:
+    if not test_methods:
+        return []
+
+    filtered: List[Dict[str, Optional[str]]] = []
+    for test in test_methods:
+        section_id = (test.get("section_id") or "").strip()
+        if section_id:
+            dot_count = section_id.count(".")
+            if dot_count > 1:
+                logger.debug(
+                    "Descartando subapartado %s (%s) por numeración profunda",
+                    test.get("title") or test.get("raw"),
+                    section_id,
+                )
+                continue
+        filtered.append(test)
+
+    return filtered
+
+
 def _strip_accents(value: str) -> str:
     return "".join(ch for ch in unicodedata.normalize("NFKD", value) if not unicodedata.combining(ch))
 
@@ -391,7 +414,9 @@ def test_solution_clean_markdown(
     # Combine both system and human messages as a single list for the LLM call
     test_method_input = structured_model.invoke(system_message + [human_message])
 
-    normalized_tests = _normalize_test_methods(test_method_input)
+    normalized_tests = _filter_primary_test_methods(
+        _normalize_test_methods(test_method_input)
+    )
     tests_with_markdown = _build_markdown_segments(normalized_tests, full_markdown)
 
     payload = {

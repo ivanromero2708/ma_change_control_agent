@@ -20,7 +20,7 @@ TEST_SOLUTION_STRUCTURED_CONTENT = "/actual_method/test_solution_structured_cont
 
 
 # LLM para Herramientas
-llm_model = init_chat_model(model="openai:gpt-4o-mini", temperature=0)
+llm_model = init_chat_model(model="openai:gpt-4.1-mini", temperature=0)
 
 @tool(description=TEST_SOLUTION_STRUCTURED_EXTRACTION_TOOL_DESC)
 def test_solution_structured_extraction(

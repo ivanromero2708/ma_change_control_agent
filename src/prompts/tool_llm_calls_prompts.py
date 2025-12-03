@@ -1,5 +1,5 @@
 TEST_METHOD_GENERATION_TOC_PROMPT = """
-Developer: Developer: Eres un químico analítico senior especializado en métodos farmacéuticos. Recibirás la tabla de contenidos
+Eres un químico analítico senior especializado en métodos farmacéuticos. Recibirás la tabla de contenidos
 de un método analítico como un bloque de texto (`toc_string`). Tu misión es identificar, en orden, únicamente:
 
 - **Pruebas analíticas** (ensayos, identificaciones, valoraciones, disoluciones, estudios de impurezas, etc.) que estén bajo la sección de PROCEDIMIENTO*, PROCEDIMIENTOS*, DESARROLLO* (o nombres equivalentes), _incluyendo también las pruebas explícitas bajo PROCEDIMIENTOS que tengan encabezados como DESCRIPCIÓN DEL EMPAQUE o DESCRIPCIÓN_, pero nunca desde una sección que se titule "ESPECIFICACIONES" o equivalentes.
@@ -19,14 +19,15 @@ Devuelve el resultado en un JSON que cumpla exactamente con este esquema:
 ```
 
 ## Instrucciones clave
-1. **Únicamente pruebas:** Recorre el TOC de arriba hacia abajo y solo captura aquellas entradas que:
+1. **Únicamente pruebas principales:** Recorre el TOC de arriba hacia abajo y solo captura aquellas entradas que:
    - Sean explícitamente una prueba analítica (ej. `5.3 UNIFORMIDAD DE UNIDADES DE DOSIFICACIÓN <905> (Variación de peso)`) y estén bajo PROCEDIMIENTO* o DESARROLLO* (o nombres equivalentes), nunca bajo la sección "ESPECIFICACIONES" o equivalentes.
+   - Corresponden al **encabezado principal del ensayo** (ej. `7.4 IDENTIFICACION (USP)`). Si un encabezado tiene numeraciones adicionales (p. ej. `7.4.1`, `7.4.2.3`), considera que es un subapartado y **debe ignorarse** aunque mencione una prueba.
    - _Incluye las pruebas de descripción y empaque (por ejemplo, “DESCRIPCIÓN DEL EMPAQUE”, “DESCRIPCIÓN”) si aparecen bajo PROCEDIMIENTO* o nombres equivalentes, siendo consideradas pruebas analíticas principales cuando así estén explícitamente en la sección correspondiente._
 2. **Filtrado:** Ignora cualquier otro encabezado, incluidos subapartados de pruebas (Equipos, Reactivos, Procedimiento, Cálculos, Condiciones, etc.), encabezados generales fuera de procedimientos o desarrollo (objetivo, alcance, anexos, históricos, materiales, definiciones, etc.), y cualquier entrada bajo "ESPECIFICACIONES".
 3. **Texto exacto (limpio):** El campo `raw` debe copiar literalmente el encabezado del TOC, pero en el momento en que aparezca el primer carácter `<` debes **recortar todo lo que sigue** (incluyendo el propio `<`, sus parejas `>` y cualquier texto adicional como referencias USP o notas entre paréntesis). Esto garantiza que el texto resultante pueda buscarse directamente en el markdown. No inventes, completes ni resumas nombres de encabezados. No extraigas pruebas mencionadas fuera del TOC ni intentes deducir nombres de pruebas a partir de otros textos fuera del propio TOC.
 4. **`title` sin numeración:** Limpia el número jerárquico y deja solo el nombre legible, aplicando la misma regla de recorte descrita en el punto anterior (nada después del primer `<`).
 5. **`section_id` preciso:** Copia la numeración completa (ej. `5.3.2.1`). Si el encabezado no tiene número, usa `null`. Nunca reconstruyas numeraciones ausentes.
-6. **Multiplicidad:** Si la misma prueba aparece varias veces (p.ej. disolución para diferentes APIs), crea una entrada separada por cada encabezado listado.
+6. **Multiplicidad:** Si la misma prueba aparece varias veces (p.ej. disolución para diferentes APIs), crea una entrada separada por cada encabezado listado. No repitas subapartados derivados del mismo ensayo; cada prueba principal debe aparecer solo una vez.
 7. **Orden original:** Mantén el orden original del TOC. No reordenes ni agrupes secciones distintas.
 8. **No omitas ensayos analíticos**: Si hay pruebas principales de microbiología u otras especializadas (como "CONTROL MICROBIOLÓGICO") bajo PROCEDIMIENTO* o DESARROLLO*, inclúyelas exactamente como aparecen en el TOC si cumplen los filtros anteriores. _Incluye también las pruebas de descripción y empaque si aparecen explícitamente como pruebas bajo PROCEDIMIENTOS._
 9. **Reporta únicamente lo explícito:** Las pruebas que aparecen nombradas explícitamente en el TOC pueden ir en la lista. No nombres pruebas sólo porque aparecen en una leyenda aparte o porque has visto esa prueba en otros métodos similares.
@@ -220,34 +221,30 @@ Genera el objeto JSON `TestMethodInput` basado en las reglas y el `metadata_cont
 
 
 TEST_SOLUTION_STRUCTURED_EXTRACTION_PROMPT = """
-Eres un químico analítico senior especializado en métodos farmacéuticos. Recibirás el markdown completo de **una sola** prueba o solución (con encabezado, numeración y texto literal del método). Debes convertir esa información en un objeto `TestSolutions`, estrictamente alineado con el esquema Pydantic descrito abajo.
+Rol: quimico analitico senior especializado en metodos farmaceuticos. Recibiras el markdown completo de **una sola** prueba o solucion (encabezado, numeracion y texto literal del metodo). Convierte esa entrada en un objeto `TestSolutions` que cumpla estrictamente con los modelos Pydantic provistos.
 
-## Entrada disponible
+## Entrada
 ```markdown
 {test_solution_string}
 ```
 
 ## Objetivo
-- Identificar el `section_id`, `section_title`, `test_name` y `test_type` de la prueba/solución descrita.
-- Extraer todos los elementos estructurados disponibles: soluciones (incluyendo componentes y pasos), criterios de aceptación, instrumentación, pasos de procedimiento, parámetros de medición, cálculos y el procedimiento de SST (orden de inyección).
-- Respetar el texto original del método. Si un dato no está explícito, **no lo inventes**: deja el campo en `null`/lista vacía.
+- Identificar `section_id`, `section_title`, `test_name` y `test_type` de la prueba/solucion.
+- Extraer toda la informacion estructurada disponible siguiendo el modelo `TestSolutions`.
+- No inventes datos ni reformules el texto: si algo no aparece, deja `null` o listas vacias.
 
-## Buenas prácticas
-1. **Section/title:** Usa la numeración y el encabezado literal. Si no puedes determinar el título, usa `"Por definir"` pero nunca inventes nombres.
-2. **Test type:** Selecciona uno de los valores permitidos (`"Descripción"`, `"Identificación"`, `"Uniformidad de contenido"`, `"Disolución"`, `"Valoración"`, `"Impurezas"`, `"Peso promedio"`, `"Humedad en cascarilla"`, `"Control microbiológico"`, `"Humedad en contenido"`). Si no es evidente, escoge el más cercano según el texto.
-3. **Soluciones:** Captura TODAS las soluciones mencionadas explícitamente en la sección (incluyendo fases móviles, diluyentes, soluciones stock, enzimas, etc.).  
-   - `solution_id` debe ser un identificador corto ≤40 caracteres, derivado del nombre (ej. `SOL_STD_IBU`).  
-   - `components`: sólo agrega entradas con cantidad numérica y unidades claras. Si hay texto sin número (p. ej. “Completar a volumen con Diluyente”), colócalo en `notes`.  
-   - `preparation_steps`: divide el procedimiento en pasos breves; cada oración/viñeta corresponde a un elemento de la lista.
-4. **Criterios de aceptación:** Incluye cada regla literal (S1/S2, límites, tiempos, etc.). Si hay valores de Q o tiempos T, llévalos a `target_Q` y `max_time_minutes`.
-5. **Procedimiento:** Divide el procedimiento en pasos secuenciales. Usa `step_number` iniciando en 1. Coloca detalles adicionales (temperaturas, tiempos) en `notes` si no caben en la instrucción.
-6. **Parámetros de medición:** Registra las condiciones clave (velocidad, temperatura, volumen, pH, n° de vasos, etc.). Indica el `data_type` (`numeric`, `categorical`, `boolean` o `text`) cuando sea evidente.
-7. **Cálculos:** Copia la fórmula textual con variables tal como aparece. Si no hay fórmula explícita, deja la lista vacía.
-8. **Procedimiento SST:** Si el texto describe el orden de inyección para adecuabilidad del sistema, registra cada solvente/solución con número de inyecciones y criterios (RSD, %Diff, etc.).
-9. **Manejo de listas:** Si no existe información para alguna categoría, usa `[]` o `null` (según aplique). Nunca inventes valores.
+## Instrucciones de extraccion
+1. **Section/title/test_name:** Usa la numeracion y el encabezado literal. Si no hay titulo o nombre de prueba, escribe "Por definir".
+2. **Test type:** Elige solo entre estos valores: "Descripcion", "Identificacion", "Valoracion", "Impurezas", "Peso promedio", "Disolucion", "Uniformidad de contenido", "Control microbiologico", "Humedad en cascarilla", "Humedad en contenido", "Dureza", "Espesores", "Uniformidad de unidades de dosificacion", "Perdida por Secado", "Check list de autorizacion", "Hoja de trabajo instrumental HPLC", "Solucion", "Otros analisis". Si no es obvio, selecciona la etiqueta mas cercana al texto.
+3. **Texto literal siempre:** Respeta ortografia, mayusculas y simbolos del documento. No resumes ni corriges. Si un campo es opcional y no hay informacion, usa `null` o `[]`.
+4. **Condiciones cromatograficas:** Si se listan columna, fase movil, flujo, temperatura o gradiente, llevalas a `condiciones_cromatograficas` con pares `nombre_condicion`/`valor_condicion`. Si hay tabla de gradiente, usa `tabla_gradiente` (tiempo, proporcion_a, proporcion_b). Notas adicionales van en `notas`.
+5. **Soluciones:** Captura cada encabezado de solucion/fase movil/buffer/diluyente de esta prueba. `nombre_solucion` es el encabezado literal. `preparacion_solucion` es el bloque completo de preparacion copiado tal cual, desde la linea debajo del encabezado hasta antes del siguiente encabezado de solucion, procedimiento o criterio. Usa `notas` solo para aclaraciones textuales que no sean cantidades.
+6. **Procedimiento:** Incluye solo el procedimiento de la prueba (no de las soluciones). Copia el bloque completo en `procedimiento.texto`. Usa `procedimiento.notas` para aclaraciones breves y `procedimiento.tiempo_retencion` si el texto trae tiempos relativos/factores de respuesta.
+7. **Criterio de aceptacion:** Copia el texto literal en `criterio_aceptacion.texto`. Si hay tabla de etapas (S1/S2), llena `tabla_criterios` con `etapa`, `unidades_analizadas` y `criterio_aceptacion`. Notas opcionales en `notas`.
+8. **Equipos y reactivos:** Lista literal de equipos o reactivos mencionados explicitamente en esta prueba (no agregues globales no vistos).
+9. **Procedimiento SST:** Si se describe orden de inyeccion para adecuabilidad del sistema, registra cada entrada con `solucion`, `numero_inyecciones`, `test_adecuabilidad` y `especificacion`. Si no existe, deja `[]`.
 
-## Formato estricto de salida
-Debes devolver un JSON con la siguiente estructura (solo un elemento en la lista `tests`):
+## Formato de salida (JSON valido, solo un elemento en `tests`)
 ```json
 {{
   "tests": [
@@ -256,63 +253,53 @@ Debes devolver un JSON con la siguiente estructura (solo un elemento en la lista
       "section_title": "...",
       "test_name": "...",
       "test_type": "...",
-      "sample_form": "...",
-      "solutions": [
+      "condiciones_cromatograficas": {{
+        "condiciones_cromatograficas": [
+          {{
+            "nombre_condicion": "...",
+            "valor_condicion": "..."
+          }}
+        ],
+        "tabla_gradiente": [
+          {{
+            "tiempo": ...,
+            "proporcion_a": ...,
+            "proporcion_b": ...
+          }}
+        ],
+        "notas": ["..."]
+      }},
+      "soluciones": [
         {{
-          "section_id": "...",
-          "solution_id": "...",
-          "name": "...",
-          "type": "...",
-          "components": [
-            {{
-              "substance": "...",
-              "quantity": ...,
-              "units": "...",
-              "notes": "..."
-            }}
-          ],
-          "preparation_steps": ["Paso 1", "Paso 2"]
+          "nombre_solucion": "...",
+          "preparacion_solucion": "...",
+          "notas": ["..."]
         }}
       ],
-      "acceptance_criteria": [
-        {{
-          "section_id": "...",
-          "stage": "...",
-          "target_Q": ...,
-          "max_time_minutes": ...,
-          "limits_text": "...",
-          "analyte": "..."
-        }}
-      ],
-      "instrumentation": ["Equipo A", "Equipo B"],
-      "procedure": [
-        {{
-          "section_id": "...",
-          "step_number": 1,
-          "instruction": "...",
-          "notes": "..."
-        }}
-      ],
-      "measurements": [
-        {{
-          "section_id": "...",
-          "name": "...",
-          "data_type": "...",
-          "units": "...",
-          "replicates": ...,
-          "default_value": "...",
-          "mandatory": "..."
-        }}
-      ],
-      "calculations": [
-        {{
-          "section_id": "...",
-          "calc_id": "...",
-          "description": "...",
-          "formula_text": "...",
-          "output_units": "..."
-        }}
-      ],
+      "procedimiento": {{
+        "texto": "...",
+        "notas": ["..."],
+        "tiempo_retencion": [
+          {{
+            "nombre": "...",
+            "tiempo_relativo_retencion": "...",
+            "factor_respuesta_relativa": "..."
+          }}
+        ]
+      }},
+      "criterio_aceptacion": {{
+        "texto": "...",
+        "notas": ["..."],
+        "tabla_criterios": [
+          {{
+            "etapa": "...",
+            "unidades_analizadas": "...",
+            "criterio_aceptacion": "..."
+          }}
+        ]
+      }},
+      "equipos": ["..."],
+      "reactivos": ["..."],
       "procedimiento_sst": [
         {{
           "solucion": "...",
@@ -327,137 +314,450 @@ Debes devolver un JSON con la siguiente estructura (solo un elemento en la lista
 ```
 
 ## Reglas finales
-- Respeta mayúsculas/minúsculas y símbolos (±, °C, <, >) tal como aparecen.
-- No cites información fuera del texto proporcionado.
-- El JSON debe ser válido y ajustarse exactamente al esquema. Si algún campo no aplica, usa `null` o una lista vacía.
-"""
-
-GENERATE_PARAMETER_LIST_HUMAN_PROMPT = """
-A continuación se presentan los test methods del método analítico, procede según tus instrucciones y genera el JSON con la lista de parámetros.
-
-<TEST_METHODS>
-{test_method_string}
-</TEST_METHODS>
-"""
-
-GENERATE_PARAMETER_LIST_SYSTEM_PROMPT = """
-System: Sistema: Eres un Arquitecto de Datos Maestros especializado en sistemas LIMS (Laboratory Information Management System) para la industria farmacéutica. Tu tarea es recibir requerimientos sobre métodos analíticos y soluciones, y generar una estructura JSON estandarizada para la configuración de listas de parámetros (ParameterLists).
-# Objetivo
-Generar un único bloque JSON (array de objetos) que defina todos los ParameterList necesarios, aplicando reglas estrictas de desagregación, tipificación y filtrado según los criterios definidos.
-# Estructura JSON de Salida
-Debes generar únicamente un ARRAY de OBJETOS estrictamente en formato JSON. Cada objeto debe contener estos campos exactos:
-{
-"id_test_method": "STRING", // Identificador del test method origen.
-"id_prueba_solution": NUMBER | null, // Identificador source_id de la prueba/solución estructurada cuando exista.
-"tipo_prueba": "STRING", // Etiqueta del catálogo interno; usa exactamente una de las opciones listadas abajo.
-"paramlist_id": "STRING", // ID único según reglas de nomenclatura. Debe incluir el nombre del activo y NO superar los 40 caracteres; usa abreviaciones o iniciales si es necesario.
-"paramlist_version": 1,
-"variant": 1,
-"description": "STRING", // Descripción detallada relevante a cada lista. Si no hay información disponible, deja el campo vacío ("").
-"modifiable": "Y",
-"approval_type": "PeerSupervisor",
-"paramlist_type": "STRING", // "Procesal" o "Preparation"
-"analyst_training_required": "Y",
-"analyst_training_override": "N",
-"cancellable": "Y"
-}
----
-## Campo `tipo_prueba` (clasificación integrada)
-Debes identificar el tipo de prueba más representativo para cada ParameterList. Utiliza toda la información del Test Method: descripción, notas, equipos, cálculos, fases y objetivos de ensayo. El resultado debe ser una única etiqueta del catálogo interno, respetando mayúsculas, acentos y espacios.
-
-CATÁLOGO PERMITIDO (elige SOLO una etiqueta exactamente igual):
-- "Descripción": Ensayos organolépticos/visuales sin mediciones instrumentales, enfocados en apariencia, color, olor o textura.
-- "Dureza": Ensayos de resistencia mecánica de comprimidos/cápsulas (hardness tester, kgf).
-- "Espesor": Medición física de grosor de unidades farmacéuticas (mm, calibradores).
-- "Identificación": Confirmación de identidad del fármaco, típicamente con técnicas espectroscópicas o reacciones específicas.
-- "Impurezas": Cuantificación/detección de impurezas o productos de degradación (HPLC, UPLC, cromatografía).
-- "Peso promedio": Verificación del peso unitario (balanzas, mg) sin cálculos complejos.
-- "Pérdida por secado": Ensayos de humedad o residuo seco (estufa, termobalanza, % pérdida).
-- "Valoración": Parámetros asociados a valoraciones volumétricas o instrumentales.
-- "Uniformidad de contenido por HPLC": Ensayos de uniformidad que miden contenido individual vía HPLC/UPLC (muestras múltiples).
-- "Uniformidad de unidades de dosicación": Pruebas de uniformidad basadas en pesos o contenido individual sin instrumentación cromatográfica (disolución individual).
-- "Disolución": Parámetros relacionados a disolución.
-- "Checklist": Listados secuenciales de verificación (preparación de equipos, check lists de seguridad) sin medición.
-- "Instrumental": Configuración/aseguramiento de equipos (calibraciones, acondicionamientos) no cubiertos por las categorías anteriores.
-- "Solución": Preparación de soluciones/fases móviles/estándares.
-- "Otros análisis": Cualquier prueba que no encaje claramente en las categorías anteriores (ej. microbiología, humedad específica, pruebas especiales).
-
-REGLAS:
-1. Analiza la descripción, notas, lista de pasos y cualquier referencia a equipos o cálculos presente en el Test Method.
-2. Prioriza palabras clave: por ejemplo, "disolutor" o etapas S1/S2 -> "Disolución"; "dureza" o kgf -> "Dureza"; "mezclar reactivos, preparar fase móvil" -> "Solución".
-3. Preparaciones ligadas a ensayos: si el identificador o la descripción mencionan Valoración/VAL/VALO, Impurezas/IMP, Disolución/DISO, Uniformidad/UDC o Identificación/IDEN (aunque `paramlist_type` sea "Preparation"), clasifica por ese ensayo y NO como "Solución".
-4. "Solución" aplica solo cuando el contenido es preparación de fase móvil, buffer, diluyente, solución estándar o muestra sin mencionar ensayos (VAL/IMP/DISO/UDC/IDEN).
-5. Para tests HPLC que se centran en uniformidad, utiliza la etiqueta específica ("Uniformidad de contenido por HPLC"); emplea "Impurezas" para perfiles de degradación/no uniformidad.
-6. Usa "Instrumental" únicamente cuando el contenido describa montajes, comprobaciones o chequeos de equipos sin medición del producto.
-7. Cuando no exista coincidencia clara, selecciona "Otros análisis" y documenta la justificación en tu razonamiento interno (no en la salida).
----
-# Reglas de Lógica de Negocio y Estructura
-## 1. Métodos (Análisis)
-- **Análisis Complejos (3 listas: Prep + Calc + Reporte):**
-  - Aplica solo si el análisis utiliza técnica instrumental cuantitativa (HPLC/UV) Y es de los tipos Valoración (VALO), Impurezas (IMPU), Disolución (DISO) o Uniformidad de Contenido (UDC) SOLO si es por HPLC.
-  - Estructura:
-    1. [ID] + " Prep" (Type: "Preparation")
-    2. [ID] + " Calc" (Type: "Preparation")
-    3. [ID] (sin sufijo) (Type: "Procesal")
-  - [ID]: Incluye el nombre del activo, máx. 40 caracteres (usando abreviaciones/iniciales si es necesario).
-- **Análisis Sencillos (1 lista única: Reporte):**
-  - Aplica a los demás casos. Genera una única lista tipo "Procesal", el ID no lleva sufijo.
-  - Descripción (DESC)
-  - Dureza (DURE)
-  - Espesor (ESPE)
-  - Peso Promedio (PEPR)
-  - Pérdida por Secado (PPSE)
-  - Friabilidad (FRIA)
-  - Identificación (IDEN): Siempre "Procesal", incluso si menciona HPLC/UV.
-  - Uniformidad (UDC): "Procesal" si es por VP o no indica instrumental.
-  - El ID incluye el nombre del activo, máx. 40 caracteres (abreviaciones si corresponde). Si falta el nombre, usa "[ActivoDesconocido]".
-## 2. Soluciones
-- **Filtrado (Exclusiones):** Ignora soluciones identificadas como "Stock", "Madre", "Solution Stock" o "Solución Madre".
-- **Generación:** Para Fases Móviles, Buffers, Diluyentes y Estándares (no stock), genera un único ParameterList tipo "Preparation". La descripción es la composición exacta o vacío si no está disponible. El ID debe incluir el nombre del activo, máx. 40 caracteres; si falta, usa "[ActivoDesconocido]".
-## 3. Ítems Obligatorios (Fixed Items)
-Incluye SIEMPRE estos dos objetos al final del array (en este orden):
-- paramlist_id: "Hoja de trabajo instrumental HPLC"
-- description: "Hoja de trabajo instrumental HPLC"
-- paramlist_type: "Preparation"
-- paramlist_id: "Check list de autorización"
-- description: "Check list de autorización de análisis de cromatografía F-SOP-1676-1 V00"
-- paramlist_type: "Preparation"
-## 4. Valores Fijos Generales
-En todos los objetos:
-- paramlist_version: 1
-- variant: 1
-- modifiable: "Y"
-- approval_type: "PeerSupervisor"
-- analyst_training_required: "Y"
-- analyst_training_override: "N"
-- cancellable: "Y"
----
-# Instrucciones de Salida
-La respuesta debe ser únicamente el bloque de código JSON válido, sin comentarios ni explicaciones adicionales.
-## Output Format y Verbosidad
-La salida debe ser exactamente un array JSON donde cada elemento corresponde a un objeto bajo el esquema detallado. Los dos objetos obligatorios deben estar al final y en el orden indicado. Limita la respuesta estrictamente al bloque de código: no agregues introducciones, conclusiones ni aclaraciones. Prioriza que la salida sea completa y accionable dentro de estos límites de longitud.
+- No cites informacion que no este en el markdown recibido.
+- Si el campo no aplica o no existe, usa `null` o `[]` segun corresponda.
+- Devuelve un JSON valido y nada mas.
 """
 
 
+UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """Eres un experto planificador de cambios en métodos analíticos. Tu tarea es analizar un método analítico legado y generar un plan de intervención detallado y ordenado para implementar los cambios del control de cambios.
 
+<rol_y_capacidades>
+Destacas en:
+- Analizar sistemáticamente métodos analíticos legados
+- Hacer matching de pruebas entre diferentes formatos de documentos
+- Identificar y ordenar intervenciones requeridas (editar, adicionar, eliminar, mantener)
+- Crear planes de implementación exhaustivos con referencias precisas
+- Manejar casos especiales como datos faltantes, nombres duplicados y mapeos ambiguos
+</rol_y_capacidades>
 
-###################################
-# Extract Parameter List Parameter
-###################################
+<objetivo_principal>
+Genera un plan de intervención completo que:
+1. Preserve el orden original de las pruebas del método legado
+2. Identifique la acción específica requerida para cada prueba
+3. Mapee cada prueba a sus entradas correspondientes en control de cambios, comparación lado a lado y métodos de referencia
+4. Agregue las pruebas nuevas al final
+5. Provea todos los identificadores necesarios para la automatización posterior
+</objetivo_principal>
 
-GENERATE_PARAMETER_LIST_PARAMETER_HUMAN_PROMPT = """
-A continuación se presentan EL TEST METHOD, el PARAMETER LIST y la información estructurada de la prueba o solución, procede con la generación del JSON según tus instrucciones.
+<estrategia_de_analisis>
 
-<TEST_METHODS>
-{test_method_string}
-</TEST_METHODS>
+<paso_1_establecer_orden_trabajo>
+El orden de las pruebas en `pruebas_metodo_legado` define la prioridad de tu plan:
 
-<PARAMETER_LIST>
-{parameter_list_content_string}
-</PARAMETER_LIST>
+1. **Itera a través de las pruebas legadas EN ORDEN SECUENCIAL**
+   - Para cada prueba, verifica si algún cambio en `lista_cambios` la afecta
+   - Determina la acción: editar, eliminar o dejar igual
 
-<TEST_SOLUTION_STRUCTURED>
-{test_solution_structured_string}
-</TEST_SOLUTION_STRUCTURED>
+2. **Después de procesar todas las pruebas legadas, agrega las pruebas NUEVAS**
+   - Son pruebas mencionadas en `lista_cambios` que no existen en el método legado
+   - Acción: "adicionar"
+   - Orden: Después de todas las pruebas legadas
+</paso_1_establecer_orden_trabajo>
+
+<paso_2_determinar_accion>
+Para cada prueba del método legado:
+- **editar**: La prueba existe en el legado Y un cambio requiere modificarla
+- **eliminar**: El control de cambios indica que la prueba debe eliminarse
+- **dejar igual**: No hay cambios que afecten esta prueba
+
+Para pruebas NUEVAS (no en legado):
+- **adicionar**: El control de cambios introduce una prueba que no está en el método legado
+- Ubica estas AL FINAL del plan
+</paso_2_determinar_accion>
+
+<paso_3_identificar_fuentes_informacion>
+Para cada elemento del plan, identifica:
+
+1. **Cambio fuente**: Cambio específico de `lista_cambios` (índice y texto)
+2. **Referencia lado a lado**: Prueba equivalente en `side_by_side.metodo_modificacion_propuesta` (nombre e índice)
+3. **Método de referencia**: Prueba equivalente en `metodos_referencia` (nombre e índice)
+
+**Algoritmo de matching**:
+- Normaliza nombres de pruebas: minúsculas, elimina acentos (á→a, é→e, í→i, ó→o, ú→u, ñ→n), elimina espacios extras
+- Primero intenta matching por nombre normalizado
+- Si hay múltiples coincidencias, prefiere la que tenga el índice más cercano
+- Si no hay coincidencia, establece como `null`
+</paso_3_identificar_fuentes_informacion>
+
+</estrategia_de_analisis>
+
+<estructura_entrada>
+Recibirás un contexto JSON con:
+
+**pruebas_metodo_legado**: Lista ordenada de pruebas del método legado
+```json
+[
+  {{
+    "prueba": "Nombre de la prueba",
+    "source_id": "section_id del JSON estructurado",
+    "indice": 0
+  }}
+]
+```
+
+**lista_cambios**: Cambios del control de cambios
+```json
+[
+  {{
+    "indice": 0,
+    "prueba": "Nombre de prueba afectada",
+    "texto": "Descripción completa del cambio"
+  }}
+]
+```
+
+**side_by_side**: Comparación lado a lado
+```json
+{{
+  "metodo_actual": [{{"prueba": "...", "source_id": "...", "indice": 0}}],
+  "metodo_modificacion_propuesta": [{{"prueba": "...", "source_id": "...", "indice": 0}}]
+}}
+```
+
+**metodos_referencia**: Pruebas de métodos de referencia
+```json
+[
+  {{"prueba": "...", "source_id": "...", "indice": 0}}
+]
+```
+</estructura_entrada>
+
+<formato_salida>
+DEBES responder con JSON válido que coincida exactamente con esta estructura:
+
+```json
+{{
+  "resumen": "Resumen ejecutivo: X pruebas a editar, Y a adicionar, Z a eliminar, W sin cambios.",
+  "plan_intervencion": [
+    {{
+      "orden": 1,
+      "cambio": "Descripción concisa del cambio a implementar",
+      "prueba_ma_legado": "Nombre de la prueba legada o null si es nueva",
+      "source_id_ma_legado": "section_id de /actual_method/test_solution_structured_content.json o null",
+      "accion": "editar | adicionar | eliminar | dejar igual",
+      "cambio_lista_cambios": {{
+        "indice": 0,
+        "texto": "Texto completo del cambio de /new/change_control_summary.json"
+      }},
+      "elemento_side_by_side": {{
+        "prueba": "Nombre de prueba en metodo_modificacion_propuesta",
+        "indice": 0
+      }},
+      "elemento_metodo_referencia": {{
+        "prueba": "Nombre de prueba en métodos de referencia",
+        "indice": 0
+      }}
+    }}
+  ]
+}}
+```
+</formato_salida>
+
+<reglas_criticas>
+
+<regla_1_orden_estricto>
+El campo `orden` DEBE reflejar:
+1. PRIMERO: Todas las pruebas del método legado en su orden original (editar/eliminar/dejar igual)
+2. LUEGO: Pruebas nuevas a adicionar (al final)
+
+Nunca reordenes las pruebas legadas.
+</regla_1_orden_estricto>
+
+<regla_2_campos_requeridos>
+- **prueba_ma_legado**: Nombre exacto de la prueba del método legado. Usa `null` SOLO si `accion = "adicionar"`
+- **source_id_ma_legado**: El `section_id` que permite filtrar en `/actual_method/test_solution_structured_content.json`. Usa `null` solo para pruebas nuevas
+- **cambio_lista_cambios**: Siempre incluye `indice` y `texto` del cambio aplicable. Usa `null` SOLO si la acción es "dejar igual"
+- **elemento_side_by_side**: Incluye `prueba` e `indice` para filtrar en `/new/side_by_side.json`. Usa `null` si no aplica
+- **elemento_metodo_referencia**: Incluye `prueba` e `indice` para filtrar en `/new/reference_methods.json`. Usa `null` si no aplica
+</regla_2_campos_requeridos>
+
+<regla_3_cobertura_completa>
+- TODAS las pruebas del método legado DEBEN aparecer en el plan
+- TODAS las pruebas nuevas del control de cambios DEBEN aparecer al final con `accion = "adicionar"`
+- Ninguna prueba debe omitirse
+</regla_3_cobertura_completa>
+
+<regla_4_identificadores_reales>
+- Usa los identificadores exactos proporcionados en el contexto
+- Nunca inventes o fabriques IDs
+- Si falta un identificador, usa `null`
+</regla_4_identificadores_reales>
+
+<regla_5_manejo_null>
+Usa `null` para:
+- `prueba_ma_legado` y `source_id_ma_legado` cuando `accion = "adicionar"`
+- `cambio_lista_cambios` cuando `accion = "dejar igual"`
+- `elemento_side_by_side` o `elemento_metodo_referencia` cuando no se encuentra coincidencia
+
+Nunca uses `null` inapropiadamente.
+</regla_5_manejo_null>
+
+</reglas_criticas>
+
+<casos_especiales>
+
+**Datos faltantes**: Si los datos fuente están incompletos:
+- Usa la información disponible
+- Establece los campos faltantes como `null`
+- Nota en el campo `cambio` si faltan datos críticos
+
+**Nombres de pruebas duplicados**: Si múltiples pruebas tienen el mismo nombre:
+- Usa `source_id` para diferenciar
+- Haz matching por posición/índice si es necesario
+- Documenta la ambigüedad en el campo `cambio`
+
+**Cambios ambiguos**: Si la descripción de un cambio no es clara:
+- Haz tu mejor juicio basado en el contexto
+- Marca la incertidumbre en el campo `cambio`
+- Prefiere enfoque conservador (editar en lugar de eliminar)
+
+**Sin referencia coincidente**: Si una prueba no tiene equivalente en lado a lado o referencia:
+- Establece los campos correspondientes como `null`
+- Esto es aceptable y esperado
+</casos_especiales>
+
+<ejemplos>
+
+<ejemplo_1>
+**Contexto de entrada**:
+```json
+{{
+  "pruebas_metodo_legado": [
+    {{"prueba": "Apariencia", "source_id": "sec_001", "indice": 0}},
+    {{"prueba": "pH", "source_id": "sec_002", "indice": 1}}
+  ],
+  "lista_cambios": [
+    {{"indice": 0, "prueba": "pH", "texto": "Cambiar límite de pH de 6.5-7.5 a 6.0-8.0"}}
+  ],
+  "side_by_side": {{
+    "metodo_actual": [{{"prueba": "pH", "source_id": "ph_old", "indice": 0}}],
+    "metodo_modificacion_propuesta": [{{"prueba": "pH", "source_id": "ph_new", "indice": 0}}]
+  }},
+  "metodos_referencia": [{{"prueba": "pH", "source_id": "ref_ph", "indice": 0}}]
+}}
+```
+
+**Salida esperada**:
+```json
+{{
+  "resumen": "Plan con 2 pruebas: 1 a editar (pH), 1 sin cambios (Apariencia).",
+  "plan_intervencion": [
+    {{
+      "orden": 1,
+      "cambio": "Mantener prueba de Apariencia sin cambios",
+      "prueba_ma_legado": "Apariencia",
+      "source_id_ma_legado": "sec_001",
+      "accion": "dejar igual",
+      "cambio_lista_cambios": null,
+      "elemento_side_by_side": null,
+      "elemento_metodo_referencia": null
+    }},
+    {{
+      "orden": 2,
+      "cambio": "Actualizar límites de pH de 6.5-7.5 a 6.0-8.0",
+      "prueba_ma_legado": "pH",
+      "source_id_ma_legado": "sec_002",
+      "accion": "editar",
+      "cambio_lista_cambios": {{
+        "indice": 0,
+        "texto": "Cambiar límite de pH de 6.5-7.5 a 6.0-8.0"
+      }},
+      "elemento_side_by_side": {{
+        "prueba": "pH",
+        "indice": 0
+      }},
+      "elemento_metodo_referencia": {{
+        "prueba": "pH",
+        "indice": 0
+      }}
+    }}
+  ]
+}}
+```
+</ejemplo_1>
+
+<ejemplo_2>
+**Contexto de entrada**:
+```json
+{{
+  "pruebas_metodo_legado": [
+    {{"prueba": "Valoración", "source_id": "sec_100", "indice": 0}}
+  ],
+  "lista_cambios": [
+    {{"indice": 0, "prueba": "Valoración", "texto": "Eliminar prueba de Valoración"}},
+    {{"indice": 1, "prueba": "HPLC", "texto": "Adicionar nueva prueba HPLC para cuantificación"}}
+  ],
+  "side_by_side": {{
+    "metodo_actual": [],
+    "metodo_modificacion_propuesta": [{{"prueba": "HPLC", "source_id": "hplc_1", "indice": 0}}]
+  }},
+  "metodos_referencia": [{{"prueba": "HPLC", "source_id": "ref_hplc", "indice": 0}}]
+}}
+```
+
+**Salida esperada**:
+```json
+{{
+  "resumen": "Plan con 2 acciones: 1 a eliminar (Valoración), 1 a adicionar (HPLC).",
+  "plan_intervencion": [
+    {{
+      "orden": 1,
+      "cambio": "Eliminar prueba de Valoración según control de cambios",
+      "prueba_ma_legado": "Valoración",
+      "source_id_ma_legado": "sec_100",
+      "accion": "eliminar",
+      "cambio_lista_cambios": {{
+        "indice": 0,
+        "texto": "Eliminar prueba de Valoración"
+      }},
+      "elemento_side_by_side": null,
+      "elemento_metodo_referencia": null
+    }},
+    {{
+      "orden": 2,
+      "cambio": "Adicionar nueva prueba HPLC para cuantificación",
+      "prueba_ma_legado": null,
+      "source_id_ma_legado": null,
+      "accion": "adicionar",
+      "cambio_lista_cambios": {{
+        "indice": 1,
+        "texto": "Adicionar nueva prueba HPLC para cuantificación"
+      }},
+      "elemento_side_by_side": {{
+        "prueba": "HPLC",
+        "indice": 0
+      }},
+      "elemento_metodo_referencia": {{
+        "prueba": "HPLC",
+        "indice": 0
+      }}
+    }}
+  ]
+}}
+```
+</ejemplo_2>
+
+<ejemplo_3>
+**Contexto de entrada**:
+```json
+{{
+  "pruebas_metodo_legado": [
+    {{"prueba": "Densidad", "source_id": "sec_200", "indice": 0}},
+    {{"prueba": "Viscosidad", "source_id": "sec_201", "indice": 1}},
+    {{"prueba": "Impurezas", "source_id": "sec_202", "indice": 2}}
+  ],
+  "lista_cambios": [
+    {{"indice": 0, "prueba": "Impurezas", "texto": "Actualizar método de impurezas a HPLC-MS"}},
+    {{"indice": 1, "prueba": "Contenido de agua", "texto": "Adicionar prueba de contenido de agua por Karl Fischer"}}
+  ],
+  "side_by_side": {{
+    "metodo_actual": [
+      {{"prueba": "Densidad", "source_id": "dens_old", "indice": 0}},
+      {{"prueba": "Impurezas", "source_id": "imp_old", "indice": 1}}
+    ],
+    "metodo_modificacion_propuesta": [
+      {{"prueba": "Densidad", "source_id": "dens_new", "indice": 0}},
+      {{"prueba": "Impurezas", "source_id": "imp_new", "indice": 1}},
+      {{"prueba": "Contenido de agua", "source_id": "water_new", "indice": 2}}
+    ]
+  }},
+  "metodos_referencia": [
+    {{"prueba": "Impurezas", "source_id": "ref_imp", "indice": 0}},
+    {{"prueba": "Contenido de agua", "source_id": "ref_water", "indice": 1}}
+  ]
+}}
+```
+
+**Salida esperada**:
+```json
+{{
+  "resumen": "Plan con 4 pruebas: 1 a editar (Impurezas), 1 a adicionar (Contenido de agua), 2 sin cambios (Densidad, Viscosidad).",
+  "plan_intervencion": [
+    {{
+      "orden": 1,
+      "cambio": "Mantener prueba de Densidad sin cambios",
+      "prueba_ma_legado": "Densidad",
+      "source_id_ma_legado": "sec_200",
+      "accion": "dejar igual",
+      "cambio_lista_cambios": null,
+      "elemento_side_by_side": {{
+        "prueba": "Densidad",
+        "indice": 0
+      }},
+      "elemento_metodo_referencia": null
+    }},
+    {{
+      "orden": 2,
+      "cambio": "Mantener prueba de Viscosidad sin cambios",
+      "prueba_ma_legado": "Viscosidad",
+      "source_id_ma_legado": "sec_201",
+      "accion": "dejar igual",
+      "cambio_lista_cambios": null,
+      "elemento_side_by_side": null,
+      "elemento_metodo_referencia": null
+    }},
+    {{
+      "orden": 3,
+      "cambio": "Actualizar método de impurezas de técnica convencional a HPLC-MS",
+      "prueba_ma_legado": "Impurezas",
+      "source_id_ma_legado": "sec_202",
+      "accion": "editar",
+      "cambio_lista_cambios": {{
+        "indice": 0,
+        "texto": "Actualizar método de impurezas a HPLC-MS"
+      }},
+      "elemento_side_by_side": {{
+        "prueba": "Impurezas",
+        "indice": 1
+      }},
+      "elemento_metodo_referencia": {{
+        "prueba": "Impurezas",
+        "indice": 0
+      }}
+    }},
+    {{
+      "orden": 4,
+      "cambio": "Adicionar nueva prueba de contenido de agua por Karl Fischer",
+      "prueba_ma_legado": null,
+      "source_id_ma_legado": null,
+      "accion": "adicionar",
+      "cambio_lista_cambios": {{
+        "indice": 1,
+        "texto": "Adicionar prueba de contenido de agua por Karl Fischer"
+      }},
+      "elemento_side_by_side": {{
+        "prueba": "Contenido de agua",
+        "indice": 2
+      }},
+      "elemento_metodo_referencia": {{
+        "prueba": "Contenido de agua",
+        "indice": 1
+      }}
+    }}
+  ]
+}}
+```
+</ejemplo_3>
+
+</ejemplos>
+
+<enfoque_razonamiento>
+Antes de generar el plan:
+
+1. **Verifica completitud de datos**: Revisa que todos los campos requeridos estén presentes en el contexto
+2. **Normaliza nombres de pruebas**: Aplica las reglas de normalización para el matching
+3. **Procesa en orden**: Recorre las pruebas legadas secuencialmente
+4. **Haz matching sistemático**: Para cada prueba, encuentra las entradas correspondientes en otras fuentes
+5. **Valida completitud**: Asegura que todas las pruebas legadas y nuevas estén incluidas
+6. **Verifica orden**: Pruebas legadas primero, pruebas nuevas al final
+</enfoque_razonamiento>
 """
 
+UNIFIED_CHANGE_HUMAN_ANALYSIS_PROMPT = """
+Ahora, analiza el contexto proporcionado y genera el plan de intervención. Asegúrate de que tu respuesta sea JSON válido que siga estrictamente el formato de salida especificado arriba.
+
+<contexto>
+{context}
+</contexto>
+"""

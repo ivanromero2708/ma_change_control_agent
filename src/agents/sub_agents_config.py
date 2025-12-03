@@ -40,8 +40,8 @@ reference_methods_subagent = {
 
 change_implementation_agent = {
     "name": "change_implementation_agent",
-    "description": "Delega a este agente cuando necesites convertir un control de cambios aprobado en parches aplicados sobre el método nuevo (planificar con `analyze_change_impact` y ejecutar cada acción con `apply_method_patch`).",
+    "description": "Delega a este agente cuando finalices el análisis de los documentos entregados, que incluyen el método analítico legado, y podrían incluir el control de cambio, el side by side o métodos analíticos de referencia. Este agente analiza la información estructurada de los documentos, produce un plan de implementación y lo ejecuta usando sus herramientas internas.",
     "system_prompt": CHANGE_IMPLEMENTATION_AGENT_INSTRUCTIONS,
-    "tools": [analyze_change_impact, apply_method_patch],
+    "tools": [analyze_change_impact, apply_method_patch, consolidate_new_method],
     "model": "openai:gpt-5-mini"
 }

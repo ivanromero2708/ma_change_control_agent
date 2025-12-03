@@ -6,7 +6,7 @@ from src.agents.sub_agents_config import *
 from src.prompts.supervisor_prompts import *
 
 # Create agent using create_react_agent directly
-llm_model = init_chat_model(model="openai:gpt-4.1-mini", temperature=0.0)
+llm_model = init_chat_model(model="openai:gpt-5-mini")
 
 
 sub_agents = [

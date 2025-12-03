@@ -14,8 +14,8 @@ from langgraph.prebuilt import InjectedState
 # 1. El modelo de estado
 from src.graph.state import DeepAgentState 
 # 2. Los modelos Pydantic *LEGADOS* (necesarios para el modelo base)
-from src.models.extraction_models import (
-    ExtractionModel, 
+from src.models.analytical_method_models import (
+    MetodoAnaliticoDA,
     AlcanceMetodo, 
     Equipo, 
     Anexo, 
@@ -65,7 +65,7 @@ class Prueba(BaseModel):
 
 # --- NUEVO MODELO Pydantic para el ARCHIVO FINAL ---
 # Este modelo es la "plantilla" para el archivo final.
-# Hereda la mayoría de los campos de ExtractionModel pero redefine 'pruebas'.
+# Hereda la mayoría de los campos de MetodoAnaliticoDA pero redefine 'pruebas'.
 
 class MetodoAnaliticoNuevo(BaseModel):
     """Modelo para el método analítico final consolidado."""
@@ -97,11 +97,11 @@ class MetodoAnaliticoNuevo(BaseModel):
 def _load_legacy_obj_from_state(
     files: dict,
     file_path: str
-) -> Union[ExtractionModel, str]:
+) -> Union[MetodoAnaliticoDA, str]:
     """
-    Carga de forma robusta el ExtractionModel desde el estado, 
+    Carga de forma robusta el MetodoAnaliticoDA desde el estado, 
     manejando dicts, JSON strings y wrappers.
-    Devuelve el objeto ExtractionModel o un string de error.
+    Devuelve el objeto MetodoAnaliticoDA o un string de error.
     """
     legacy_method_entry = files.get(file_path)
 
@@ -118,19 +118,19 @@ def _load_legacy_obj_from_state(
             except json.JSONDecodeError as exc:
                 return f"Error: No se pudo decodificar el JSON de '{file_path}'. Detalle: {exc}"
 
-    if isinstance(legacy_method_payload, ExtractionModel):
+    if isinstance(legacy_method_payload, MetodoAnaliticoDA):
         return legacy_method_payload
     elif isinstance(legacy_method_payload, dict):
         try:
-            return ExtractionModel(**legacy_method_payload)
+            return MetodoAnaliticoDA(**legacy_method_payload)
         except ValidationError as exc:
-            return f"Error: No se pudo reconstruir '{file_path}' como ExtractionModel. Detalle: {exc}"
+            return f"Error: No se pudo reconstruir '{file_path}' como MetodoAnaliticoDA. Detalle: {exc}"
     elif isinstance(legacy_method_payload, str):
         try:
             parsed_payload = json.loads(legacy_method_payload)
-            return ExtractionModel(**parsed_payload)
+            return MetodoAnaliticoDA(**parsed_payload)
         except (json.JSONDecodeError, ValidationError) as exc:
-            return f"Error: No se pudo interpretar '{file_path}' como JSON de ExtractionModel. Detalle: {exc}"
+            return f"Error: No se pudo interpretar '{file_path}' como JSON de MetodoAnaliticoDA. Detalle: {exc}"
     else:
         return f"Error: El contenido en '{file_path}' no es un formato compatible."
 

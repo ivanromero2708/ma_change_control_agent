@@ -36,9 +36,9 @@ summarization_model = init_chat_model(model="openai:gpt-4.1-mini")
 # Diccionarios de trabajo
 
 extraction_models = {
-    "legacy_method": ExtractionModel,
+    "legacy_method": MetodoAnaliticoDA,
     "change_control": ChangeControlModel,
-    "annex_documents": ExtractionModel
+    "annex_documents": MetodoAnaliticoDA
 }
 
 filenames = {
