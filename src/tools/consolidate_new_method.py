@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from copy import deepcopy
-from typing import Annotated, Any, Optional, List
+from typing import Annotated, Any, Optional, List, Tuple
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
@@ -84,15 +84,15 @@ def _find_prueba_entry(
     return None, None
 
 
-def _iter_patch_payloads(files: dict[str, Any], patches_dir: str) -> List[dict[str, Any]]:
+def _iter_patch_payloads(files: dict[str, Any], patches_dir: str) -> List[Tuple[str, dict[str, Any]]]:
     prefix = patches_dir.rstrip("/") + "/"
-    collected: List[dict[str, Any]] = []
+    collected: List[Tuple[str, dict[str, Any]]] = []
     for path, entry in files.items():
         if isinstance(path, str) and path.startswith(prefix):
             payload = _load_json_payload(files, path)
             if isinstance(payload, dict):
-                collected.append(payload)
-    return sorted(collected, key=lambda item: item.get("action_index", 0))
+                collected.append((path, payload))
+    return sorted(collected, key=lambda item: item[1].get("action_index", 0))
 
 
 @tool(description=CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION)
@@ -131,12 +131,13 @@ def consolidate_new_method(
 
     working_method = base_model.model_dump(mode="json")
     patches = _iter_patch_payloads(files, patches_dir)
+    consolidated_patch_paths: list[str] = [path for path, _ in patches]
 
     applied = 0
     skipped = 0
     missing = 0
 
-    for patch in patches:
+    for _, patch in patches:
         accion = (patch.get("accion") or "").strip().lower()
         id_prueba = patch.get("id_prueba")
         nombre_prueba = patch.get("prueba")
@@ -182,6 +183,9 @@ def consolidate_new_method(
 
     files_update = dict(files)
     files_update[output_path] = {"content": method_str, "data": method_dump}
+    for patch_path in consolidated_patch_paths:
+        if patch_path != output_path:
+            files_update.pop(patch_path, None)
 
     tool_message = (
         f"Metodo consolidado en {output_path}. "

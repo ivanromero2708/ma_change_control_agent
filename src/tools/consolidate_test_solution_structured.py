@@ -68,6 +68,7 @@ def consolidate_test_solution_structured(
 ) -> Command:
     files = dict(state.get("files", {}))
     candidate_entries: List[Dict[str, Any]] = []
+    consumed_paths: List[str] = []
 
     for path, file_entry in files.items():
         if not isinstance(path, str):
@@ -90,6 +91,7 @@ def consolidate_test_solution_structured(
                 entry_copy["source_id"] = inferred_id
 
         candidate_entries.append(entry_copy)
+        consumed_paths.append(path)
 
     if not candidate_entries:
         message = (
@@ -109,6 +111,9 @@ def consolidate_test_solution_structured(
         "content": json.dumps(candidate_entries, indent=2, ensure_ascii=False),
         "data": candidate_entries,
     }
+    for consumed_path in consumed_paths:
+        if consumed_path != TEST_SOLUTION_STRUCTURED_CONTENT:
+            files.pop(consumed_path, None)
 
     summary_message = (
         "Consolidé "

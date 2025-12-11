@@ -590,7 +590,6 @@ def _invoke_llm_with_retry(llm_structured, human_prompt: str, system_prompt: str
 
 @tool(description=CHANGE_CONTROL_ANALYSIS_TOOL_DESCRIPTION)
 def analyze_change_impact(
-    new_method_path: str,
     state: Annotated[DeepAgentState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
@@ -598,14 +597,13 @@ def analyze_change_impact(
     Analiza el impacto de cambios y genera un plan de intervención detallado.
     
     Este tool:
-    1. Carga y valida todos los archivos necesarios
+    1. Carga y valida todos los archivos necesarios (rutas por defecto)
     2. Extrae y normaliza las pruebas de cada fuente
     3. Invoca un LLM para generar el plan de intervención
     4. Valida la completitud del plan
     5. Guarda el resultado en el filesystem virtual
     
     Args:
-        new_method_path: Ruta del nuevo método (para compatibilidad, no usado actualmente)
         state: Estado del grafo con el filesystem virtual
         tool_call_id: ID de la llamada al tool
         

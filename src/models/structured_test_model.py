@@ -98,9 +98,6 @@ class TestSolution(BaseModel):
         "Espesores",                               # SYSTEM_PROMPT_ESPESOR
         "Uniformidad de unidades de dosificación", # SYSTEM_PROMPT_UNIFORMIDAD_UNIDADES_DOSICACION
         "Pérdida por Secado",                      # SYSTEM_PROMPT_PERDIDA_POR_SECADO
-        "Check list de autorización",              # SYSTEM_PROMPT_CHECKLIST
-        "Hoja de trabajo instrumental HPLC",       # SYSTEM_PROMPT_INSTRUMENTAL
-        "Solución",                                # SYSTEM_PROMPT_SOLUCION
         "Otros análisis"                           # SYSTEM_PROMPT_OTROS_ANALISIS
     ] = Field(..., description="Tipo del test analítico a configurar.")
     condiciones_cromatograficas: Optional[CondicionCromatografica] = Field(None, description="Listado de condiciones cromatográficas")

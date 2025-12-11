@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # LLMs
 
-structured_extraction_model = init_chat_model(model="openai:gpt-4.1-mini")
+structured_extraction_model = init_chat_model(model="openai:gpt-5-mini")
 
 # Diccionarios de trabajo
 

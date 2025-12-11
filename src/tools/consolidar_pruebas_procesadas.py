@@ -167,6 +167,7 @@ def consolidar_pruebas_procesadas(
 
     # --- PASO 2: Cargar todas las Pruebas Nuevas Procesadas ---
     nuevas_pruebas_lista: List[Prueba] = []
+    rutas_consolidadas: List[str] = []
     
     for ruta_prueba in rutas_pruebas_nuevas:
         # Lee el dict que 'structure_specs_procs' guardó
@@ -194,6 +195,9 @@ def consolidar_pruebas_procesadas(
             error_msg = f"Error al validar el archivo {ruta_prueba}. Detalle: {exc}"
             logger.error(error_msg)
             return Command(update={"messages": [ToolMessage(content=error_msg, tool_call_id=tool_call_id)]})
+
+        if isinstance(ruta_prueba, str):
+            rutas_consolidadas.append(ruta_prueba)
     
     # --- PASO 3: "Parchear" - Crear el Objeto Final ---
     # Reemplaza la clave 'pruebas' (que tenía datos legados) 
@@ -215,12 +219,16 @@ def consolidar_pruebas_procesadas(
     try:
         final_json_payload = final_method.model_dump(mode="json")
         final_json_string = json.dumps(final_json_payload, indent=2, ensure_ascii=False)
-        
+
         # Guardar en el formato {"content": ...} para compatibilidad con 'read_file'
         files[ruta_final] = {
             "content": final_json_string,
             "data": final_json_payload,
         }
+
+        for ruta_eliminar in rutas_consolidadas:
+            if ruta_eliminar != ruta_final:
+                files.pop(ruta_eliminar, None)
         
     except Exception as exc:
         error_msg = f"Error al serializar el método final. Detalle: {exc}"

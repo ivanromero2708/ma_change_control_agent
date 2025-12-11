@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any, Optional, List, Iterable
 
 from langchain.chat_models import init_chat_model
@@ -39,43 +39,9 @@ LEGACY_METHOD_DEFAULT_PATH = "/actual_method/test_solution_structured_content.js
 method_patch_model = init_chat_model(model="openai:gpt-5-mini", temperature=0)
 
 
-class MetodoPruebaLLM(BaseModel):
-    id_prueba: str = Field(
-        ...,
-        description="Identificador unico (usa el existente cuando corresponda o genera uno nuevo al agregar pruebas).",
-    )
-    prueba: str = Field(
-        ...,
-        description="Nombre exacto de la prueba en el metodo nuevo.",
-    )
-    procedimientos: str = Field(
-        ...,
-        description="Procedimiento detallado o nota de eliminacion; no puede quedar vacio.",
-    )
-    equipos: Optional[List[str]] = Field(
-        default=None,
-        description="Lista de equipos utilizados; usa null si no aplica.",
-    )
-    condiciones_cromatograficas: Optional[List[CondicionCromatografica]] = Field(
-        default=None,
-        description="Condiciones cromatograficas completas, si existen.",
-    )
-    reactivos: Optional[List[str]] = Field(
-        default=None,
-        description="Reactivos utilizados; null si no aplica.",
-    )
-    soluciones: Optional[List[Solucion]] = Field(
-        default=None,
-        description="Soluciones preparadas; usa [] o null segun corresponda.",
-    )
-    especificaciones: List[Especificacion] = Field(
-        ...,
-        description="Al menos una especificacion con criterio de aceptacion.",
-    )
-
-
 class GeneratedMethodPatch(BaseModel):
-    prueba_resultante: MetodoPruebaLLM
+    """Respuesta estructurada del LLM para generar/editar una prueba."""
+    prueba_resultante: MetodoPrueba
     comentarios: Optional[str] = Field(
         default=None,
         description="Notas breves sobre como se construyo la prueba final o recordatorios para el equipo",
@@ -182,22 +148,35 @@ def _normalize_text(value: Optional[str]) -> Optional[str]:
 
 def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
     """
-    Transforma pruebas del formato legado al nuevo formato requerido por MetodoAnaliticoNuevo.
+    Transforma pruebas del formato legado (TestSolution de structured_test_model.py) 
+    al nuevo formato requerido por MetodoAnaliticoNuevo (Prueba de consolidar_pruebas_procesadas.py).
     
-    El formato legado puede ser:
-    1. Lista de dicts con estructura {tests: [...], source_id: N} (wrapper)
-    2. Lista directa de pruebas con campos: section_id, section_title, test_name, 
-       procedimiento, criterio_aceptacion, soluciones, condiciones_cromatograficas, etc.
+    Formato legado (TestSolution):
+    - section_id, section_title, test_name, test_type
+    - condiciones_cromatograficas: CondicionCromatografica con nombre_condicion/valor_condicion
+    - soluciones: List[Solucion] con nombre_solucion/preparacion_solucion/notas
+    - procedimiento: Procedimiento con texto/notas/tiempo_retencion
+    - criterio_aceptacion: CriterioAceptacion con texto/notas/tabla_criterios
+    - equipos: List[str]
+    - reactivos: List[str]
+    - procedimiento_sst: List[OrdenInyeccion]
     
-    Formato nuevo requiere: id_prueba, prueba, procedimientos, equipos, 
-    condiciones_cromatograficas, reactivos, soluciones, especificaciones.
+    Formato nuevo (Prueba):
+    - id_prueba, prueba, procedimientos
+    - condiciones_cromatograficas: List[CondicionCromatografica] con nombre/descripcion
+    - soluciones: List[Solucion] con nombre_solucion/preparacion_solucion
+    - equipos: List[str]
+    - reactivos: List[str]
+    - especificaciones: List[Especificacion] con prueba/texto_especificacion/subespecificacion
+    
+    El formato legado puede venir envuelto en: [{tests: [...], source_id: N}, ...]
     """
     # Primero, aplanar si hay wrappers con "tests" anidados
     flattened_tests = []
     for item in legacy_tests:
         if not isinstance(item, dict):
             continue
-        # Si el item tiene "tests" anidado, extraer esas pruebas
+        # Si el item tiene "tests" anidado (wrapper de TestSolutions), extraer esas pruebas
         if "tests" in item and isinstance(item["tests"], list):
             flattened_tests.extend(item["tests"])
         else:
@@ -212,8 +191,8 @@ def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
         # Nombre de la prueba (prioridad: test_name > section_title > prueba)
         prueba_nombre = test.get("test_name") or test.get("section_title") or test.get("prueba") or "Sin nombre"
         
-        # Mapear campos del formato legado al nuevo
-        new_test = {
+        # Mapear campos del formato TestSolution al formato Prueba
+        new_test: dict[str, Any] = {
             "id_prueba": test.get("section_id") or test.get("id_prueba"),
             "prueba": prueba_nombre,
             "procedimientos": "",
@@ -224,33 +203,37 @@ def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
             "especificaciones": [],
         }
         
-        # Extraer procedimiento (puede ser dict con "texto" o string directo)
+        # --- Extraer procedimiento ---
+        # TestSolution.procedimiento es un objeto Procedimiento con {texto, notas, tiempo_retencion}
         proc = test.get("procedimiento")
         if isinstance(proc, dict):
             new_test["procedimientos"] = proc.get("texto") or ""
         elif isinstance(proc, str):
             new_test["procedimientos"] = proc
         
-        # Extraer equipos (puede ser lista de strings o lista de dicts)
+        # --- Extraer equipos (ya es List[str] en TestSolution) ---
         equipos = test.get("equipos")
         if isinstance(equipos, list):
             for eq in equipos:
                 if isinstance(eq, str):
                     new_test["equipos"].append(eq)
                 elif isinstance(eq, dict):
+                    # Por si acaso viene como dict con "nombre"
                     new_test["equipos"].append(eq.get("nombre") or str(eq))
         
-        # Extraer reactivos (puede ser lista de strings)
+        # --- Extraer reactivos (ya es List[str] en TestSolution) ---
         reactivos = test.get("reactivos")
         if isinstance(reactivos, list):
             for r in reactivos:
                 if isinstance(r, str):
                     new_test["reactivos"].append(r)
         
-        # Extraer condiciones cromatográficas (puede ser dict o lista)
+        # --- Extraer condiciones cromatográficas ---
+        # TestSolution.condiciones_cromatograficas es CondicionCromatografica con nombre_condicion/valor_condicion
+        # Prueba.condiciones_cromatograficas es List[CondicionCromatografica] con nombre/descripcion
         cond_crom = test.get("condiciones_cromatograficas")
         if isinstance(cond_crom, dict):
-            # Formato: {"nombre_condicion": "...", "valor_condicion": "..."}
+            # Mapear nombre_condicion -> nombre, valor_condicion -> descripcion
             new_test["condiciones_cromatograficas"].append({
                 "nombre": cond_crom.get("nombre_condicion") or cond_crom.get("nombre") or "Condición",
                 "descripcion": cond_crom.get("valor_condicion") or cond_crom.get("descripcion") or str(cond_crom),
@@ -263,7 +246,9 @@ def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
                         "descripcion": cond.get("valor_condicion") or cond.get("descripcion") or str(cond),
                     })
         
-        # Extraer soluciones
+        # --- Extraer soluciones ---
+        # TestSolution.soluciones es List[Solucion] con nombre_solucion/preparacion_solucion/notas
+        # Prueba.soluciones es List[Solucion] con nombre_solucion/preparacion_solucion (sin notas)
         soluciones = test.get("soluciones")
         if isinstance(soluciones, list):
             for sol in soluciones:
@@ -273,12 +258,15 @@ def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
                         "preparacion_solucion": sol.get("preparacion_solucion") or sol.get("preparacion") or "",
                     })
         
-        # Extraer especificaciones desde criterio_aceptacion o especificaciones
+        # --- Extraer especificaciones desde criterio_aceptacion ---
+        # TestSolution.criterio_aceptacion es CriterioAceptacion con texto/notas/tabla_criterios
+        # Prueba.especificaciones es List[Especificacion] con prueba/texto_especificacion/subespecificacion
         criterio = test.get("criterio_aceptacion")
-        especificaciones = test.get("especificaciones")
+        especificaciones_existentes = test.get("especificaciones")
         
-        if isinstance(especificaciones, list) and especificaciones:
-            for esp in especificaciones:
+        if isinstance(especificaciones_existentes, list) and especificaciones_existentes:
+            # Si ya tiene especificaciones en formato nuevo, usarlas directamente
+            for esp in especificaciones_existentes:
                 if isinstance(esp, dict):
                     new_test["especificaciones"].append({
                         "prueba": esp.get("prueba") or prueba_nombre,
@@ -286,12 +274,25 @@ def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
                         "subespecificacion": esp.get("subespecificacion"),
                     })
         elif isinstance(criterio, dict):
-            # Formato legado: {"texto": "...", "notas": [...], "tabla_criterios": [...]}
+            # Transformar CriterioAceptacion a Especificacion
             texto_criterio = criterio.get("texto") or ""
+            
+            # Construir subespecificaciones desde tabla_criterios si existe
+            subespecificaciones = None
+            tabla_criterios = criterio.get("tabla_criterios")
+            if isinstance(tabla_criterios, list) and tabla_criterios:
+                subespecificaciones = []
+                for tc in tabla_criterios:
+                    if isinstance(tc, dict):
+                        subespecificaciones.append({
+                            "nombre_subespecificacion": tc.get("etapa") or tc.get("nombre_subespecificacion") or "",
+                            "criterio_aceptacion_subespecificacion": tc.get("criterio_aceptacion") or tc.get("criterio_aceptacion_subespecificacion") or "",
+                        })
+            
             new_test["especificaciones"].append({
                 "prueba": prueba_nombre,
                 "texto_especificacion": texto_criterio,
-                "subespecificacion": None,
+                "subespecificacion": subespecificaciones if subespecificaciones else None,
             })
         elif isinstance(criterio, str):
             new_test["especificaciones"].append({
@@ -309,7 +310,7 @@ def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
         
         transformed.append(new_test)
     
-    logger.debug(f"Transformadas {len(transformed)} pruebas del formato legado al nuevo.")
+    logger.debug(f"Transformadas {len(transformed)} pruebas del formato TestSolution al formato Prueba.")
     return transformed
 
 
@@ -650,7 +651,7 @@ def apply_method_patch(
         _save_patch(files_update, action_index, accion_normalizada, None, target_id, target_name)
         files_update[new_method_path] = {"content": method_str, "data": method_dump}
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "plan_path": plan_path,
             "method_path": new_method_path,
             "action_index": action_index,
@@ -733,7 +734,7 @@ def apply_method_patch(
     _save_patch(files_update, action_index, accion_normalizada, prueba_json, target_id, target_name)
     files_update[new_method_path] = {"content": method_str, "data": method_dump}
     log_entry = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "plan_path": plan_path,
         "method_path": new_method_path,
         "action_index": action_index,

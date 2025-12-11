@@ -141,8 +141,8 @@ APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
   - `plan_path (str)`: Ruta al plan generado por `analyze_change_impact`. Default `/new/change_implementation_plan.json`.
   - `action_index (int)`: Indice (0-based) de la accion a ejecutar.
   - `side_by_side_path (str)`: Ruta al JSON del analisis side-by-side. Default `/new/side_by_side.json`.
-  - `reference_method_path (str)`: Ruta al JSON de metodos de referencia. Default `/new/reference_method.json`.
-  - `legacy_method_path (str)`: Ruta al metodo legado estructurado. Default `/legacy/legacy_method.json`.
+  - `reference_method_path (str)`: Ruta al JSON de metodos de referencia. Default `/new/reference_methods.json`.
+  - `legacy_method_path (str)`: Ruta al metodo legado estructurado. Default `/actual_method/test_solution_structured_content.json`.
   - `new_method_path (str)`: Ruta al metodo consolidado que sera modificado. Default `/new/new_method_final.json`.
   
   ## Salida y Efectos en el Estado
