@@ -14,17 +14,10 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field, ValidationError
 
 from src.graph.state import DeepAgentState
-from src.prompts.tool_prompts import APPLY_METHOD_PATCH_TOOL_DESCRIPTION
+from src.prompts.tool_description_prompts import APPLY_METHOD_PATCH_TOOL_DESCRIPTION
 from src.tools.analyze_change_impact import (
     UnifiedInterventionPlan,
     UnifiedInterventionAction,
-)
-from src.tools.consolidar_pruebas_procesadas import (
-    MetodoAnaliticoNuevo,
-    Prueba as MetodoPrueba,
-    Especificacion,
-    CondicionCromatografica,
-    Solucion,
 )
 
 logger = logging.getLogger(__name__)

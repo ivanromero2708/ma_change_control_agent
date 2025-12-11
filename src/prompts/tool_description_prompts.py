@@ -213,3 +213,23 @@ APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
   ## Siguiente Paso Esperado
   - Una vez procesadas todas las acciones, ejecutar `consolidate_new_method` para fusionar todos los parches en el metodo final a renderizar.
   """
+
+CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION = """
+  Fusiona todos los parches individuales generados por `apply_method_patch` en un solo metodo final listo para renderizar.
+  
+  ## Cuando usar
+  - Despues de aplicar todas las acciones con `apply_method_patch`.
+  - Cuando necesites un unico JSON consistente para entregar o renderizar.
+  
+  ## Parametros
+  - `patches_dir (str)`: Directorio virtual donde se guardan los parches individuales. Default `/new/applied_changes`.
+  - `base_method_path (str)`: Ruta al metodo base sobre el que se aplicaran los parches. Default `/new/new_method_final.json`.
+  - `output_path (str)`: Ruta de salida del metodo consolidado. Default `/new/new_method_final.json`.
+  
+  ## Salida y Efectos en el Estado
+  - **Mensaje de Retorno (ToolMessage):** Resumen de parches leidos y aplicados.
+  - **Actualizacion del Estado:** Escribe el metodo consolidado en `output_path` con todos los cambios aplicados.
+  
+  ## Siguiente Paso Esperado
+  - Revisar el metodo consolidado (si es necesario) y proceder con el renderizado o pasos de QA.
+  """

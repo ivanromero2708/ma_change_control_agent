@@ -12,7 +12,7 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from src.graph.state import DeepAgentState
-from src.prompts.tool_prompts import CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION
+from src.prompts.tool_description_prompts import CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION
 from src.tools.consolidar_pruebas_procesadas import MetodoAnaliticoNuevo
 
 logger = logging.getLogger(__name__)

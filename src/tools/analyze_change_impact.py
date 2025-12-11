@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.graph.state import DeepAgentState
-from src.prompts.tool_prompts import CHANGE_CONTROL_ANALYSIS_TOOL_DESCRIPTION
+from src.prompts.tool_description_prompts import CHANGE_CONTROL_ANALYSIS_TOOL_DESCRIPTION
 from src.prompts.tool_llm_calls_prompts import UNIFIED_CHANGE_HUMAN_ANALYSIS_PROMPT, UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT
 
 # --- Configuración ---

@@ -615,3 +615,79 @@ UNIFIED_CHANGE_HUMAN_ANALYSIS_PROMPT = """
   {context}
   </contexto>
 """
+
+#############################################################################################################
+# Structured Extraction Prompts (LLM calls for extract_annex_cc tool)
+#############################################################################################################
+
+STRUCTURED_EXTRACTION_CHANGE_CONTROL = """
+  Eres un asistente experto en análisis de documentos de control de cambios (CC) farmacéuticos.
+  Tu tarea es leer el texto de entrada, que describe los cambios realizados, y extraer la información clave en un formato JSON estructurado.
+
+  Debes generar un JSON que se ajuste perfectamente al siguiente modelo de datos:
+
+  ```json
+  {{
+    "filename": "CC-001_resumen_cambios.md",
+    "summary": "Un resumen conciso en lenguaje natural de los cambios descritos.",
+    "lista_cambios": [
+      "Descripción textual del primer cambio",
+      "Descripción textual del segundo cambio",
+      "..."
+    ]
+  }}
+  ````
+
+  # Reglas de Generación de Campos
+
+  Debes seguir estas reglas estrictamente:
+
+  **`filename`**:
+
+    * Genera un nombre de archivo descriptivo basado en el contenido.
+    * Debe ser corto, usar guiones bajos (`_`) en lugar de espacios, y terminar en `.md`.
+    * Por ejemplo: `CC-00123_actualizacion_limites.md`.
+
+  **`summary`**:
+
+    * Escribe un resumen muy conciso, en una o dos frases, que describa el propósito general de los cambios.
+    * Ejemplo: "Actualización de los criterios de aceptación para la prueba de Dureza y ajuste del procedimiento de Disolución."
+
+  **`lista_cambios`**:
+
+    * Esta es la tarea principal. Lee atentamente el texto de entrada.
+    * Extrae cada cambio individual o "ítem de cambio" descrito como un **string separado** en la lista.
+    * Copia el texto del cambio tan literalmente como sea posible, incluyendo detalles técnicos, valores antiguos y valores nuevos.
+    * Si un cambio menciona la "justificación", inclúyela como parte del string de descripción del cambio.
+    * Si el texto de entrada describe 5 cambios distintos, la `lista_cambios` debe contener 5 strings.
+
+  # Texto de Entrada (Control de Cambio)
+
+  El texto a continuación contiene la descripción detallada de los cambios.
+
+  <descripcion_detallada_cambio>
+  {metadata_content}
+  </descripcion_detallada_cambio>
+
+  Genera el JSON estructurado basado *únicamente* en el texto de entrada.
+"""
+
+STRUCTURED_EXTRACTION_SIDE_BY_SIDE = """
+  Extraer información específica que será insertada en el método analítico modificado a partir de la información extraída de un documento side by side. Debe ser estructurada acorde al formato del método analítico.
+
+  ## JSON de Entrada
+
+  <descripcion_side_by_side>
+  {metadata_content}
+  </descripcion_side_by_side>
+"""
+
+STRUCTURED_EXTRACTION_REFERENCE_METHODS = """
+  Extraer información específica que será insertada en el método analítico modificado a partir de la información extraída de diferentes métodos analíticos de referencia. Debe ser estructurada acorde al formato del método analítico.
+
+  ## JSON de Entrada
+
+  <datos_metodo_referencia>
+  {metadata_content}
+  </datos_metodo_referencia>
+"""

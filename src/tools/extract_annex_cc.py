@@ -24,7 +24,12 @@ import base64
 import json
 from contextlib import contextmanager
 
-from src.prompts.tool_prompts import *
+from src.prompts.tool_llm_calls_prompts import (
+    STRUCTURED_EXTRACTION_CHANGE_CONTROL,
+    STRUCTURED_EXTRACTION_SIDE_BY_SIDE,
+    STRUCTURED_EXTRACTION_REFERENCE_METHODS,
+)
+from src.prompts.tool_description_prompts import EXTRACT_STRUCTURED_DATA_PROMPT_TOOL_DESC
 from src.models import *
 from src.graph.state import DeepAgentState
 
