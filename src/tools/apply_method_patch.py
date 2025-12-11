@@ -19,6 +19,13 @@ from src.tools.analyze_change_impact import (
     UnifiedInterventionPlan,
     UnifiedInterventionAction,
 )
+from src.models.analytical_method_models import (
+    Prueba as MetodoPrueba,
+    MetodoAnaliticoNuevo,
+    Especificacion,
+    CondicionCromatografica,
+    Solucion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +149,7 @@ def _normalize_text(value: Optional[str]) -> Optional[str]:
 def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
     """
     Transforma pruebas del formato legado (TestSolution de structured_test_model.py) 
-    al nuevo formato requerido por MetodoAnaliticoNuevo (Prueba de consolidar_pruebas_procesadas.py).
+    al nuevo formato requerido por MetodoAnaliticoNuevo (Prueba de analytical_method_models.py).
     
     Formato legado (TestSolution):
     - section_id, section_title, test_name, test_type

@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from src.graph.state import DeepAgentState
 from src.prompts.tool_description_prompts import CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION
-from src.tools.consolidar_pruebas_procesadas import MetodoAnaliticoNuevo
+from src.models.analytical_method_models import MetodoAnaliticoNuevo
 
 logger = logging.getLogger(__name__)
 

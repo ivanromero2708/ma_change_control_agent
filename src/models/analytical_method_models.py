@@ -294,6 +294,65 @@ class MetodoAnaliticoDA(BaseModel):
 # METODO ANALITICO INCLUYENDO MARKDOWN
 # ==========================================
 
+# ==========================================
+# MODELOS PARA PRUEBAS (usado por apply_method_patch, consolidate_new_method)
+# ==========================================
+
+class Subespecificacion(BaseModel):
+    nombre_subespecificacion: str = Field(..., description="Nombre de la subespecificación")
+    criterio_aceptacion_subespecificacion: str = Field(..., description="Criterio de aceptación de la subespecificación")
+
+class Especificacion(BaseModel):
+    prueba: str = Field(..., description="Prueba del método analítico a la que se refiere la especificación.")
+    texto_especificacion: str = Field(..., description="Texto de la especificacion incluyendo criterio de aceptación")
+    subespecificacion: Optional[List[Subespecificacion]] = Field(None, description="Subespecificaciones del método analítico")
+
+class Solucion(BaseModel):
+    nombre_solucion: str = Field(..., description="Nombre de la solución")
+    preparacion_solucion: str = Field(..., description="Texto descriptivo de la preparación de la solución")
+
+class CondicionCromatografica(BaseModel):
+    nombre: str = Field(..., description="Nombre de la condición cromatográfica")
+    descripcion: str = Field(..., description="Descripción de la condición cromatográfica")
+
+class Prueba(BaseModel):
+    id_prueba: Optional[str] = Field(
+        default=None,
+        description="Identificador único (UUID o hash) de la prueba dentro del método.",
+    )
+    prueba: str = Field(..., description="Prueba del método analítico a la que se refiere el procedimiento.")
+    procedimientos: str = Field(..., description="Descripción detallada de los procedimientos de la prueba analítica.")
+    equipos: Optional[List[str]] = Field(None, description="Listado de Equipos declarados en la prueba")
+    condiciones_cromatograficas: Optional[List[CondicionCromatografica]] = Field(None, description="Condiciones cromatográficas de la prueba analítica (Si Aplica)")
+    reactivos: Optional[List[str]] = Field(None, description="Listado de los reactivos")
+    soluciones: Optional[List[Solucion]] = Field(None, description="Listado de las soluciones")
+    especificaciones: List[Especificacion] = Field(..., description="Especificaciones del método analítico")
+
+
+class MetodoAnaliticoNuevo(BaseModel):
+    """Modelo para el método analítico final consolidado."""
+    tipo_metodo: Optional[str] = Field(None)
+    nombre_producto: Optional[str] = Field(None)
+    numero_metodo: Optional[str] = Field(None)
+    version_metodo: Optional[str] = Field(None)
+    codigo_producto: Optional[str] = Field(None)
+    objetivo: Optional[str] = Field(None)
+    alcance_metodo: Optional[AlcanceMetodo] = Field(None)
+    definiciones: Optional[List[str]] = Field(None)
+    recomendaciones_seguridad: Optional[List[str]] = Field(None)
+    materiales: Optional[List[str]] = Field(None)
+    equipos: Optional[List[Equipo]] = Field(None)
+    anexos: Optional[List[Anexo]] = Field(None)
+    autorizaciones: Optional[List[Autorizacion]] = Field(None)
+    documentos_soporte: Optional[List[DocumentoSoporte]] = Field(None)
+    historico_cambios: Optional[List[HistoricoCambio]] = Field(None)
+    pruebas: List[Prueba] = Field(description="La lista de pruebas procesadas en el nuevo formato.")
+
+
+# ==========================================
+# METODO ANALITICO INCLUYENDO MARKDOWN
+# ==========================================
+
 class MetodoAnaliticoCompleto(BaseModel):
     apis: Optional[List[str]] = Field(
         None,
