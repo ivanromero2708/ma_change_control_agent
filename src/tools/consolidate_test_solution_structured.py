@@ -1,3 +1,13 @@
+import warnings
+
+# Silenciar warnings de Pydantic sobre NotRequired y FileData de deepagents
+warnings.filterwarnings(
+    "ignore",
+    message=".*NotRequired.*",
+    category=UserWarning,
+    module="pydantic.*"
+)
+
 import copy
 import json
 import logging

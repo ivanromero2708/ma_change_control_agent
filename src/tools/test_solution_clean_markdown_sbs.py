@@ -1,4 +1,14 @@
-﻿import asyncio
+﻿import warnings
+
+# Silenciar warnings de Pydantic sobre NotRequired y FileData de deepagents
+warnings.filterwarnings(
+    "ignore",
+    message=".*NotRequired.*",
+    category=UserWarning,
+    module="pydantic.*"
+)
+
+import asyncio
 import json
 import logging
 import re
@@ -19,12 +29,12 @@ from src.prompts.tool_description_prompts import TEST_SOLUTION_CLEAN_MARKDOWN_SB
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_PATH = "/actual_method"
-TEST_SOLUTION_MARKDOWN_DOC_NAME = "/actual_method/test_solution_markdown.json"
-TEST_METADATA_TOC_DOC_NAME = "/actual_method/method_metadata_TOC.json"
+DEFAULT_BASE_PATH = "/proposed_method"
+TEST_SOLUTION_MARKDOWN_DOC_NAME = "/proposed_method/test_solution_markdown.json"
+TEST_METADATA_TOC_DOC_NAME = "/proposed_method/method_metadata_TOC.json"
 
 CHUNK_SIZE_TOKENS = 3000
-CHUNK_OVERLAP_TOKENS = 300
+CHUNK_OVERLAP_TOKENS = 0
 CHUNK_SEPARATORS = [
     "\n\n",
     "\n",
@@ -84,6 +94,16 @@ CHUNK_SYSTEM_PROMPT = """
     - Equipos / Materiales
     - Subsecciones numeradas con más de un punto decimal (ej: 7.1.1, 7.9.2, 7.10.3)
     - Encabezados de página/documento (ej: "DE CAMBIO SC-25-777", "PRUEBAS PARA LA MATERIA PRIMA", "Página X de Y")
+    
+    **IMPORTANTE - NO extraigas contenido de tablas de adecuabilidad del sistema:**
+    - Filas de tablas que contengan columnas como "Solución", "Número de Inyecciones", "Parámetro a evaluar", "Especificación"
+    - Valores en columnas de "Parámetro a evaluar" (ej: "Resolución", "Señal/ruido", "Pureza Enantiomérica", "Identificación de picos", "Cuantificación Solvente Residual")
+    - Filas que describen inyecciones de soluciones (ej: "Solución estándar | 1 | ...", "Solución muestra | 1 | ...")
+    - Las pruebas analíticas son ENCABEZADOS/TÍTULOS de sección (##, ###, **texto**), NO contenido dentro de celdas de tablas de procedimiento
+    
+    **Parámetros de SST (Test de Adecuabilidad del Sistema) - NO extraer:**
+    - "Relación Pico/Valle", "Desviación Estándar Relativa (%RSD)", "Factor de Cola", "Asimetría", "Señal/Ruido (S/N)", "Resolución R", "Factor de Capacidad", "Platos Teóricos"
+    - Estos son PARÁMETROS de adecuabilidad que aparecen en tablas, NO pruebas analíticas principales
 
     ### REGLAS DE EXTRACCIÓN
     - **raw**: Copia SOLO la línea del encabezado/título EXACTAMENTE como aparece (incluyendo #, **, |, etc.), NO incluyas el contenido/procedimiento de la prueba.
@@ -178,6 +198,18 @@ CHUNK_SYSTEM_PROMPT = """
     **Ejemplo 8 - NO es prueba analítica (NO extraer):**
     Input: "## Cálculos"
     → NO extraer (es sección de cálculos)
+
+    **Ejemplo 9 - NO es prueba analítica (NO extraer - contenido de tabla de adecuabilidad):**
+    Input: "|  Solución estándar | 1 | Identificación de picos | Identificar los picos principales...  |"
+    → NO extraer ("Identificación de picos" es un PARÁMETRO A EVALUAR dentro de una tabla, NO un encabezado de prueba)
+
+    **Ejemplo 10 - NO es prueba analítica (NO extraer - parámetro en tabla):**
+    Input: "|  5. Resolución (Muestra) | 1 | Pureza Enantiomérica | No más de 2.5%  |"
+    → NO extraer ("Pureza Enantiomérica" aquí es un parámetro de evaluación en una fila de tabla, NO un título de prueba)
+
+    **Ejemplo 11 - NO es prueba analítica (NO extraer - parámetro en tabla):**
+    Input: "|  Solución muestra (1 réplica) | 1 | Cuantificación Solvente Residual | Tolueno: No más de 890 ppm  |"
+    → NO extraer (es una fila de tabla de procedimiento con parámetros, NO un encabezado de prueba)
 """
 
 CHUNK_HUMAN_PROMPT_TEMPLATE = """
@@ -484,7 +516,7 @@ def _markdown_doc_path(base_path: str) -> str:
     return f"{base}/test_solution_markdown.json"
 
 
-@traceable(name="test_solution_clean_markdown")
+@traceable(name="test_solution_clean_markdown_sbs")
 def _run_extraction_pipeline(full_markdown: str) -> List[Dict[str, Optional[str]]]:
     """
     Pipeline principal de extracción:
@@ -492,7 +524,7 @@ def _run_extraction_pipeline(full_markdown: str) -> List[Dict[str, Optional[str]
     2. Extrae encabezados de cada chunk en paralelo
     3. Deduplica y fusiona resultados
     4. Filtra solo pruebas principales
-    5. Construye segmentos de markdown
+    5. Construye segmentos de markdown (sin pre-procesamiento adicional; la columna ya viene filtrada)
     """
     chunks = _split_markdown_into_chunks(full_markdown)
     logger.info("Markdown dividido en %d chunks", len(chunks))

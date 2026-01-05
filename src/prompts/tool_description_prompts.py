@@ -67,30 +67,30 @@ TEST_SOLUTION_CLEAN_MARKDOWN_TOOL_DESC = """
 # Test/Solution Clean Markdown SBS (Side-by-Side) tool description
 #############################################################################################################
 TEST_SOLUTION_CLEAN_MARKDOWN_SBS_TOOL_DESC = """
-  Versión especializada para documentos Side-by-Side. Lee el archivo `{base_path}/method_metadata_TOC.json` generado por `sbs_proposed_column_to_pdf_md` y extrae pruebas/soluciones del markdown de la columna propuesta.
+  Version especializada para documentos Side-by-Side. Lee el archivo `{base_path}/method_metadata_TOC.json` generado por `sbs_proposed_column_to_pdf_md` y extrae pruebas/soluciones del markdown de la columna propuesta.
 
-  ## Cuándo usar
-  - Ejecuta esta herramienta inmediatamente después de `sbs_proposed_column_to_pdf_md`, dentro del Side-by-Side Agent.
-  - Úsala para procesar documentos comparativos donde ya se extrajo la columna del método propuesto.
+  ## Cuando usar
+  - Ejecuta esta herramienta inmediatamente despues de `sbs_proposed_column_to_pdf_md`, dentro del Side-by-Side Agent.
+  - Usala para procesar documentos comparativos donde ya se extrajo la columna del metodo propuesto.
 
   ## Diferencias con `test_solution_clean_markdown`
-  - **Sin pre-procesamiento de sección PROCEDIMIENTOS:** El markdown ya viene filtrado por columna desde `sbs_proposed_column_to_pdf_md`.
-  - **Prompt genérico:** No asume estructura de secciones numeradas (PROCEDIMIENTOS, ESPECIFICACIONES, etc.).
-  - **Optimizado para Side-by-Side:** Diseñado para documentos comparativos con formato de tabla.
+  - Sin pre-procesamiento de seccion PROCEDIMIENTOS: el markdown ya viene filtrado por columna desde `sbs_proposed_column_to_pdf_md`.
+  - Prompt generico: no asume estructura de secciones numeradas (PROCEDIMIENTOS, ESPECIFICACIONES, etc.).
+  - Optimizado para Side-by-Side: disenado para documentos comparativos con formato de tabla.
 
-  ## Buenas Prácticas
-  - **Precondición:** Asegúrate de que `state['files']` contenga `{base_path}/method_metadata_TOC.json` con `markdown_completo` (columna propuesta).
-  - **Ruta típica:** Usa `base_path="/proposed_method"` para documentos Side-by-Side.
+  ## Buenas Practicas
+  - Precondicion: Asegurate de que `state['files']` contenga `{base_path}/method_metadata_TOC.json` con `markdown_completo` (solo markdown; no se esperan campos de TOC ni APIs).
+  - Ruta tipica: Usa `base_path="/proposed_method"` (valor por defecto) para documentos Side-by-Side.
 
-  ## Parámetros
-  - `base_path (str)`: Ruta base donde se encuentran los archivos. Default: `/actual_method` (pero típicamente se usa `/proposed_method`).
+  ## Parametros
+  - `base_path (str)`: Ruta base donde se encuentran los archivos. Default: `/proposed_method` (puedes ajustarlo si necesitas otro prefijo).
 
   ## Salida y efectos en el estado
-  - **ToolMessage:** Reporta cuántas pruebas/soluciones se generaron y cuántas obtuvieron markdown.
-  - **Estado (`state['files']`):** Crea/actualiza `{base_path}/test_solution_markdown.json` con:
-    - `full_markdown`: texto consolidado del método propuesto.
+  - ToolMessage: Reporta cuantas pruebas/soluciones se generaron y cuantas obtuvieron markdown.
+  - Estado (`state['files']`): Crea/actualiza `{base_path}/test_solution_markdown.json` con:
+    - `full_markdown`: texto consolidado del metodo propuesto.
     - `toc_entries`: encabezados identificados.
-    - `items`: lista de `{raw, title, section_id, markdown}` para cada prueba o solución.
+    - `items`: lista de `{raw, title, section_id, markdown}` para cada prueba o solucion.
 
   ## Siguiente Paso Esperado
   - Con este archivo disponible, ejecuta `test_solution_structured_extraction(base_path="/proposed_method")` para estructurar cada prueba.

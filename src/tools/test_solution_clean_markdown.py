@@ -5,6 +5,16 @@ import re
 from datetime import datetime, timezone
 from typing import Annotated, Dict, List, Optional
 
+import warnings
+
+# Silenciar warnings de Pydantic sobre NotRequired y FileData de deepagents
+warnings.filterwarnings(
+    "ignore",
+    message=".*NotRequired.*",
+    category=UserWarning,
+    module="pydantic.*"
+)
+
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool

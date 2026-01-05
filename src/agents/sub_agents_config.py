@@ -39,7 +39,12 @@ reference_methods_subagent = {
     "name": "reference_methods_agent",
     "description": "Delega a este agente siempre que te entreguen uno o varios documentos de métodos analíticos de referencia. Este agente se encargará de ejecutar las herramientas requeridas para generar un json estructurado con el método analítico en el formato nuevo",
     "system_prompt": REFERENCE_METHODS_AGENT_INSTRUCTIONS,
-    "tools": [extract_annex_cc],
+    "tools": [
+        pdf_da_metadata_toc,
+        test_solution_clean_markdown,
+        test_solution_structured_extraction,
+        consolidate_test_solution_structured
+    ],
     "model": "openai:gpt-5-mini"
 }
 
@@ -47,6 +52,10 @@ change_implementation_agent = {
     "name": "change_implementation_agent",
     "description": "Delega a este agente cuando finalices el análisis de los documentos entregados, que incluyen el método analítico legado, y podrían incluir el control de cambio, el side by side o métodos analíticos de referencia. Este agente analiza la información estructurada de los documentos, produce un plan de implementación y lo ejecuta usando sus herramientas internas.",
     "system_prompt": CHANGE_IMPLEMENTATION_AGENT_INSTRUCTIONS,
-    "tools": [analyze_change_impact, apply_method_patch, consolidate_new_method],
+    "tools": [
+        analyze_change_impact, 
+        apply_method_patch, 
+        consolidate_new_method        
+    ],
     "model": "openai:gpt-5-mini"
 }
