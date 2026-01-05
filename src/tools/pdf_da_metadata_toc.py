@@ -543,8 +543,9 @@ def pdf_da_metadata_toc(
     dir_method: str,
     state: Annotated[DeepAgentState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
+    base_path: str = "/actual_method",
 ) -> Command:
-    document_name = TEST_METADATA_TOC_DOC_NAME
+    document_name = f"{base_path}/method_metadata_TOC.json"
 
     # 1. Procesar PDF
     try:

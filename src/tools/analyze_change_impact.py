@@ -38,9 +38,6 @@ logger = logging.getLogger(__name__)
 ## LLMs
 change_control_analysis_model = init_chat_model(model="openai:gpt-5-mini")
 
-CHANGE_IMPLEMENTATION_PLAN_PATH = "/new/change_implementation_plan.json"
-PROPOSED_METHOD_DEFAULT_PATH = "/proposed_method/test_solution_structured_content.json"
-
 
 # --- Modelos Pydantic ---
 class CambioListaCambios(BaseModel):
@@ -49,16 +46,11 @@ class CambioListaCambios(BaseModel):
     texto: str = Field(description="Texto completo del cambio de /new/change_control_summary.json")
 
 
-class ElementoSideBySide(BaseModel):
-    """Referencia a una prueba en la comparación lado a lado."""
-    prueba: str = Field(description="Nombre de la prueba en metodo_modificacion_propuesta")
-    indice: int = Field(description="Índice de la prueba en /new/side_by_side.json")
-
-
-class ElementoMetodoReferencia(BaseModel):
-    """Referencia a una prueba en los métodos de referencia."""
-    prueba: str = Field(description="Nombre de la prueba en métodos de referencia")
-    indice: int = Field(description="Índice de la prueba en /new/reference_methods.json")
+class ElementoMetodoPropuesto(BaseModel):
+    """Referencia a una prueba en el método propuesto."""
+    prueba: str = Field(description="Nombre de la prueba en el método propuesto")
+    indice: int = Field(description="Índice de la prueba en /proposed_method/test_solution_structured_content.json")
+    source_id: Optional[int] = Field(default=None, description="source_id de la prueba en el método propuesto")
 
 
 class UnifiedInterventionAction(BaseModel):
@@ -80,13 +72,9 @@ class UnifiedInterventionAction(BaseModel):
         default=None,
         description="Elemento de lista_cambios con índice y texto. null si no hay cambio (dejar igual)",
     )
-    elemento_side_by_side: Optional[ElementoSideBySide] = Field(
+    elemento_metodo_propuesto: Optional[ElementoMetodoPropuesto] = Field(
         default=None,
-        description="Prueba e índice en /new/side_by_side.json. null si no aplica",
-    )
-    elemento_metodo_referencia: Optional[ElementoMetodoReferencia] = Field(
-        default=None,
-        description="Prueba e índice en /new/reference_methods.json. null si no aplica",
+        description="Prueba e índice en /proposed_method/test_solution_structured_content.json. null si no aplica (ej: eliminar)",
     )
 
     @field_validator("accion", mode="before")
@@ -355,14 +343,6 @@ def _collect_cambios_from_strings(cambios_strings: list[str]) -> list[dict[str, 
     logger.debug(f"Recolectados {len(records)} cambios desde strings")
     return records
 
-
-# --- Constantes de rutas ---
-LEGACY_METHOD_DEFAULT_PATH = "/actual_method/test_solution_structured_content.json"
-CHANGE_CONTROL_DEFAULT_PATH = "/new/change_control_summary.json"
-SIDE_BY_SIDE_DEFAULT_PATH = "/new/side_by_side.json"
-REFERENCE_METHOD_DEFAULT_PATH = "/new/reference_methods.json"
-
-
 # --- Funciones de extracción de pruebas ---
 
 def _extract_tests_from_legacy(legacy_payload) -> list:
@@ -415,57 +395,57 @@ def _extract_tests_from_legacy(legacy_payload) -> list:
     return []
 
 
-def _extract_tests_from_sbs(sbs_payload: Optional[dict], key: str) -> list:
+def _extract_tests_from_proposed(proposed_payload) -> list:
     """
-    Extrae lista de pruebas de la comparación lado a lado.
+    Extrae lista de pruebas del método propuesto.
+    
+    La estructura es igual que el método legado:
+    Lista de wrappers: [{"tests": [...], "source_id": N}, ...]
     
     Args:
-        sbs_payload: Payload del archivo side_by_side.json
-        key: Clave a extraer ("metodo_modificacion_propuesta")
+        proposed_payload: Payload del archivo /proposed_method/test_solution_structured_content.json
         
     Returns:
-        Lista de pruebas
+        Lista de pruebas aplanada con source_id preservado
     """
-    if not sbs_payload or not isinstance(sbs_payload, dict):
+    if not proposed_payload:
         return []
     
-    items = sbs_payload.get(key) or []
-    
-    # Cada item puede tener estructura anidada {"tests": [...]}
-    result = []
-    for item in items:
-        if isinstance(item, dict) and "tests" in item:
-            result.extend(item.get("tests") or [])
-        else:
-            result.append(item)
-    
-    logger.debug(f"Extraídas {len(result)} pruebas de side_by_side['{key}']")
-    return result
-
-
-def _extract_tests_from_ref(ref_payload: Optional[dict]) -> list:
-    """
-    Extrae lista de pruebas de métodos de referencia.
-    
-    Args:
-        ref_payload: Payload del archivo reference_methods.json
+    # Si es lista, puede ser lista de wrappers o lista directa de pruebas
+    if isinstance(proposed_payload, list):
+        flattened = []
+        for item in proposed_payload:
+            if isinstance(item, dict):
+                source_id = item.get("source_id")
+                # Verificar si es un wrapper con "tests" anidado
+                if "tests" in item and isinstance(item["tests"], list):
+                    for test in item["tests"]:
+                        if isinstance(test, dict):
+                            # Preservar source_id del wrapper en cada test
+                            test_copy = dict(test)
+                            if source_id is not None:
+                                test_copy["_source_id"] = source_id
+                            flattened.append(test_copy)
+                else:
+                    # Es una prueba directa
+                    flattened.append(item)
         
-    Returns:
-        Lista de pruebas
-    """
-    if not ref_payload:
-        return []
+        if flattened:
+            logger.debug(f"Extraídas {len(flattened)} pruebas del método propuesto (aplanadas)")
+            return flattened
+        
+        logger.debug(f"Payload propuesto es lista directa con {len(proposed_payload)} elementos")
+        return proposed_payload
     
-    if isinstance(ref_payload, dict):
-        tests = ref_payload.get("tests") or ref_payload.get("pruebas") or []
-        logger.debug(f"Extraídas {len(tests)} pruebas de métodos de referencia")
+    # Si es dict, buscar "tests" o "pruebas"
+    if isinstance(proposed_payload, dict):
+        tests = proposed_payload.get("tests") or proposed_payload.get("pruebas") or []
+        if isinstance(tests, list):
+            return _extract_tests_from_proposed(tests)
+        logger.debug(f"Extraídas {len(tests)} pruebas del método propuesto")
         return tests
     
-    if isinstance(ref_payload, list):
-        logger.debug(f"Payload de referencia es lista directa con {len(ref_payload)} elementos")
-        return ref_payload
-    
-    logger.warning(f"Formato inesperado de ref_payload: {type(ref_payload)}")
+    logger.warning(f"Formato inesperado de proposed_payload: {type(proposed_payload)}")
     return []
 
 
@@ -481,7 +461,7 @@ def _validate_context(llm_context: dict) -> tuple[bool, str]:
     Returns:
         Tupla (es_válido, mensaje_error)
     """
-    required_keys = ["pruebas_metodo_legado", "lista_cambios", "side_by_side", "metodos_referencia"]
+    required_keys = ["pruebas_metodo_legado", "lista_cambios", "pruebas_metodo_propuesto"]
     
     for key in required_keys:
         if key not in llm_context:
@@ -494,16 +474,8 @@ def _validate_context(llm_context: dict) -> tuple[bool, str]:
     if not isinstance(llm_context["lista_cambios"], list):
         return False, "'lista_cambios' debe ser una lista"
     
-    if not isinstance(llm_context["side_by_side"], dict):
-        return False, "'side_by_side' debe ser un diccionario"
-    
-    if not isinstance(llm_context["metodos_referencia"], list):
-        return False, "'metodos_referencia' debe ser una lista"
-    
-    # Validar que side_by_side tenga las claves esperadas
-    sbs = llm_context["side_by_side"]
-    if "metodo_modificacion_propuesta" not in sbs:
-        return False, "'side_by_side' debe contener 'metodo_modificacion_propuesta'"
+    if not isinstance(llm_context["pruebas_metodo_propuesto"], list):
+        return False, "'pruebas_metodo_propuesto' debe ser una lista"
     
     logger.info("Contexto validado exitosamente")
     return True, ""
@@ -600,14 +572,23 @@ def _invoke_llm_with_retry(llm_structured, human_prompt: str, system_prompt: str
 
 # --- Tool principal ---
 
+# --- Constantes de rutas ---
+LEGACY_METHOD_DEFAULT_PATH = "/actual_method/test_solution_structured_content.json"
+CHANGE_CONTROL_DEFAULT_PATH = "/new/change_control_summary.json"
+PROPOSED_METHOD_DEFAULT_PATH = "/proposed_method/test_solution_structured_content.json"
+
+CHANGE_IMPLEMENTATION_PLAN_PATH = "/new/change_implementation_plan.json"
+
+
+
 @tool(description=CHANGE_CONTROL_ANALYSIS_TOOL_DESCRIPTION)
 def analyze_change_impact(
     state: Annotated[DeepAgentState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
+
+    # Rutas por defecto
     proposed_method_path: str = PROPOSED_METHOD_DEFAULT_PATH,
-    side_by_side_path: str = SIDE_BY_SIDE_DEFAULT_PATH,
     legacy_method_path: str = LEGACY_METHOD_DEFAULT_PATH,
-    reference_methods_path: str = REFERENCE_METHOD_DEFAULT_PATH,
     change_control_path: str = CHANGE_CONTROL_DEFAULT_PATH,
 ) -> Command:
     """
@@ -638,27 +619,22 @@ def analyze_change_impact(
     logger.info("Cargando archivos necesarios...")
     
     cc_payload = _load_json_payload(files, change_control_path)
-    raw_sbs_payload = _load_json_payload(files, side_by_side_path)
     proposed_payload = _load_json_payload(files, proposed_method_path)
-    ref_payload = _load_json_payload(files, reference_methods_path)
     legacy_payload = _load_json_payload(files, legacy_method_path)
-
-    # Preferir el método propuesto estructurado si existe; si no, usar side-by-side tradicional
-    if proposed_payload:
-        sbs_payload = {"metodo_modificacion_propuesta": proposed_payload}
-        logger.info("Usando metodo propuesto de /proposed_method/ para side-by-side.")
-    else:
-        sbs_payload = raw_sbs_payload
     
-    # Validar archivo crítico
+    # Validar archivos críticos
     if cc_payload is None:
         msg = f"ERROR: No se encontró el archivo de control de cambios en {change_control_path}."
         logger.error(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
     
+    if proposed_payload is None:
+        msg = f"ERROR: No se encontró el método propuesto en {proposed_method_path}."
+        logger.error(msg)
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+    
     logger.info("✓ Control de cambios cargado")
-    if sbs_payload: logger.info("✓ Side-by-side cargado")
-    if ref_payload: logger.info("✓ Métodos de referencia cargados")
+    logger.info("✓ Método propuesto cargado")
     if legacy_payload: logger.info("✓ Método legado cargado")
     
     # --- Paso 2: Extraer lista de cambios del resumen ---
@@ -690,24 +666,19 @@ def analyze_change_impact(
     lista_cambios = _collect_cambios_from_strings(raw_lista_cambios)
     logger.info(f"  → Cambios identificados: {len(lista_cambios)}")
     
-    # Side-by-side (solo metodo_modificacion_propuesta)
-    sbs_propuesta_raw = _extract_tests_from_sbs(sbs_payload, "metodo_modificacion_propuesta")
-    side_by_side_context = {
-        "metodo_modificacion_propuesta": _collect_prueba_records_with_index(sbs_propuesta_raw),
-    }
-    logger.info(f"  → Side-by-side propuesta: {len(side_by_side_context['metodo_modificacion_propuesta'])}")
-    
-    # Métodos de referencia
-    ref_tests_raw = _extract_tests_from_ref(ref_payload)
-    metodos_referencia = _collect_prueba_records_with_index(ref_tests_raw)
-    logger.info(f"  → Métodos de referencia: {len(metodos_referencia)}")
+    # Método propuesto (de /proposed_method/test_solution_structured_content.json)
+    proposed_tests_raw = _extract_tests_from_proposed(proposed_payload)
+    pruebas_metodo_propuesto = _collect_prueba_records_with_index(
+        proposed_tests_raw,
+        source_id_key="_source_id"
+    )
+    logger.info(f"  → Pruebas método propuesto: {len(pruebas_metodo_propuesto)}")
     
     # --- Paso 4: Construir contexto unificado ---
     llm_context = {
         "pruebas_metodo_legado": pruebas_metodo_legado,
         "lista_cambios": lista_cambios,
-        "side_by_side": side_by_side_context,
-        "metodos_referencia": metodos_referencia,
+        "pruebas_metodo_propuesto": pruebas_metodo_propuesto,
     }
     
     # Validar contexto

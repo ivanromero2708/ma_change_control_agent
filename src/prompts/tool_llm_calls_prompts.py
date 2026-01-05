@@ -439,7 +439,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   Genera un plan de intervención completo que:
   1. Preserve el orden original de las pruebas del método legado
   2. Identifique la acción específica requerida para cada prueba
-  3. Mapee cada prueba a sus entradas correspondientes en control de cambios, comparación lado a lado y métodos de referencia
+  3. Mapee cada prueba a sus entradas correspondientes en control de cambios y método propuesto
   4. Agregue las pruebas nuevas al final
   5. Provea todos los identificadores necesarios para la automatización posterior
   </objetivo_principal>
@@ -474,8 +474,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   Para cada elemento del plan, identifica:
 
   1. **Cambio fuente**: Cambio específico de `lista_cambios` (índice y texto)
-  2. **Referencia lado a lado**: Prueba equivalente en `side_by_side.metodo_modificacion_propuesta` (nombre e índice)
-  3. **Método de referencia**: Prueba equivalente en `metodos_referencia` (nombre e índice)
+  2. **Método propuesto**: Prueba equivalente en `pruebas_metodo_propuesto` (nombre, índice y source_id)
 
   **Algoritmo de matching**:
   - Normaliza nombres de pruebas: minúsculas, elimina acentos (á→a, é→e, í→i, ó→o, ú→u, ñ→n), elimina espacios extras
@@ -511,18 +510,14 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   ]
   ```
 
-  **side_by_side**: Comparación lado a lado
-  ```json
-  {{
-    "metodo_actual": [{{"prueba": "...", "source_id": "...", "indice": 0}}],
-    "metodo_modificacion_propuesta": [{{"prueba": "...", "source_id": "...", "indice": 0}}]
-  }}
-  ```
-
-  **metodos_referencia**: Pruebas de métodos de referencia
+  **pruebas_metodo_propuesto**: Pruebas del método propuesto (de /proposed_method/test_solution_structured_content.json)
   ```json
   [
-    {{"prueba": "...", "source_id": "...", "indice": 0}}
+    {{
+      "prueba": "Nombre de la prueba",
+      "source_id": "source_id del wrapper en el JSON",
+      "indice": 0
+    }}
   ]
   ```
   </estructura_entrada>
@@ -544,13 +539,10 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
           "indice": 0,
           "texto": "Texto completo del cambio de /new/change_control_summary.json"
         }},
-        "elemento_side_by_side": {{
-          "prueba": "Nombre de prueba en metodo_modificacion_propuesta",
-          "indice": 0
-        }},
-        "elemento_metodo_referencia": {{
-          "prueba": "Nombre de prueba en métodos de referencia",
-          "indice": 0
+        "elemento_metodo_propuesto": {{
+          "prueba": "Nombre de prueba en el método propuesto",
+          "indice": 0,
+          "source_id": 1
         }}
       }}
     ]
@@ -572,8 +564,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   - **prueba_ma_legado**: Nombre exacto de la prueba del método legado. Usa `null` SOLO si `accion = "adicionar"`
   - **source_id_ma_legado**: El `section_id` que permite filtrar en `/actual_method/test_solution_structured_content.json`. Usa `null` solo para pruebas nuevas
   - **cambio_lista_cambios**: Siempre incluye `indice` y `texto` del cambio aplicable. Usa `null` SOLO si la acción es "dejar igual"
-  - **elemento_side_by_side**: Incluye `prueba` e `indice` para filtrar en `/new/side_by_side.json`. Usa `null` si no aplica
-  - **elemento_metodo_referencia**: Incluye `prueba` e `indice` para filtrar en `/new/reference_methods.json`. Usa `null` si no aplica
+  - **elemento_metodo_propuesto**: Incluye `prueba`, `indice` y `source_id` para filtrar en `/proposed_method/test_solution_structured_content.json`. Usa `null` si no aplica (ej: eliminar)
   </regla_2_campos_requeridos>
 
   <regla_3_cobertura_completa>
@@ -592,7 +583,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   Usa `null` para:
   - `prueba_ma_legado` y `source_id_ma_legado` cuando `accion = "adicionar"`
   - `cambio_lista_cambios` cuando `accion = "dejar igual"`
-  - `elemento_side_by_side` o `elemento_metodo_referencia` cuando no se encuentra coincidencia
+  - `elemento_metodo_propuesto` cuando no se encuentra coincidencia o cuando `accion = "eliminar"`
 
   Nunca uses `null` inapropiadamente.
   </regla_5_manejo_null>
@@ -616,8 +607,8 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   - Marca la incertidumbre en el campo `cambio`
   - Prefiere enfoque conservador (editar en lugar de eliminar)
 
-  **Sin referencia coincidente**: Si una prueba no tiene equivalente en lado a lado o referencia:
-  - Establece los campos correspondientes como `null`
+  **Sin referencia coincidente**: Si una prueba no tiene equivalente en el método propuesto:
+  - Establece `elemento_metodo_propuesto` como `null`
   - Esto es aceptable y esperado
   </casos_especiales>
 
@@ -634,11 +625,10 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
     "lista_cambios": [
       {{"indice": 0, "prueba": "pH", "texto": "Cambiar límite de pH de 6.5-7.5 a 6.0-8.0"}}
     ],
-    "side_by_side": {{
-      "metodo_actual": [{{"prueba": "pH", "source_id": "ph_old", "indice": 0}}],
-      "metodo_modificacion_propuesta": [{{"prueba": "pH", "source_id": "ph_new", "indice": 0}}]
-    }},
-    "metodos_referencia": [{{"prueba": "pH", "source_id": "ref_ph", "indice": 0}}]
+    "pruebas_metodo_propuesto": [
+      {{"prueba": "Apariencia", "source_id": 1, "indice": 0}},
+      {{"prueba": "pH", "source_id": 2, "indice": 1}}
+    ]
   }}
   ```
 
@@ -654,8 +644,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
         "source_id_ma_legado": "sec_001",
         "accion": "dejar igual",
         "cambio_lista_cambios": null,
-        "elemento_side_by_side": null,
-        "elemento_metodo_referencia": null
+        "elemento_metodo_propuesto": {{"prueba": "Apariencia", "indice": 0, "source_id": 1}}
       }},
       {{
         "orden": 2,
@@ -667,14 +656,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
           "indice": 0,
           "texto": "Cambiar límite de pH de 6.5-7.5 a 6.0-8.0"
         }},
-        "elemento_side_by_side": {{
-          "prueba": "pH",
-          "indice": 0
-        }},
-        "elemento_metodo_referencia": {{
-          "prueba": "pH",
-          "indice": 0
-        }}
+        "elemento_metodo_propuesto": {{"prueba": "pH", "indice": 1, "source_id": 2}}
       }}
     ]
   }}
@@ -692,11 +674,9 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
       {{"indice": 0, "prueba": "Valoración", "texto": "Eliminar prueba de Valoración"}},
       {{"indice": 1, "prueba": "HPLC", "texto": "Adicionar nueva prueba HPLC para cuantificación"}}
     ],
-    "side_by_side": {{
-      "metodo_actual": [],
-      "metodo_modificacion_propuesta": [{{"prueba": "HPLC", "source_id": "hplc_1", "indice": 0}}]
-    }},
-    "metodos_referencia": [{{"prueba": "HPLC", "source_id": "ref_hplc", "indice": 0}}]
+    "pruebas_metodo_propuesto": [
+      {{"prueba": "HPLC", "source_id": 1, "indice": 0}}
+    ]
   }}
   ```
 
@@ -715,8 +695,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
           "indice": 0,
           "texto": "Eliminar prueba de Valoración"
         }},
-        "elemento_side_by_side": null,
-        "elemento_metodo_referencia": null
+        "elemento_metodo_propuesto": null
       }},
       {{
         "orden": 2,
@@ -728,14 +707,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
           "indice": 1,
           "texto": "Adicionar nueva prueba HPLC para cuantificación"
         }},
-        "elemento_side_by_side": {{
-          "prueba": "HPLC",
-          "indice": 0
-        }},
-        "elemento_metodo_referencia": {{
-          "prueba": "HPLC",
-          "indice": 0
-        }}
+        "elemento_metodo_propuesto": {{"prueba": "HPLC", "indice": 0, "source_id": 1}}
       }}
     ]
   }}
@@ -755,20 +727,10 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
       {{"indice": 0, "prueba": "Impurezas", "texto": "Actualizar método de impurezas a HPLC-MS"}},
       {{"indice": 1, "prueba": "Contenido de agua", "texto": "Adicionar prueba de contenido de agua por Karl Fischer"}}
     ],
-    "side_by_side": {{
-      "metodo_actual": [
-        {{"prueba": "Densidad", "source_id": "dens_old", "indice": 0}},
-        {{"prueba": "Impurezas", "source_id": "imp_old", "indice": 1}}
-      ],
-      "metodo_modificacion_propuesta": [
-        {{"prueba": "Densidad", "source_id": "dens_new", "indice": 0}},
-        {{"prueba": "Impurezas", "source_id": "imp_new", "indice": 1}},
-        {{"prueba": "Contenido de agua", "source_id": "water_new", "indice": 2}}
-      ]
-    }},
-    "metodos_referencia": [
-      {{"prueba": "Impurezas", "source_id": "ref_imp", "indice": 0}},
-      {{"prueba": "Contenido de agua", "source_id": "ref_water", "indice": 1}}
+    "pruebas_metodo_propuesto": [
+      {{"prueba": "Densidad", "source_id": 1, "indice": 0}},
+      {{"prueba": "Impurezas", "source_id": 2, "indice": 1}},
+      {{"prueba": "Contenido de agua", "source_id": 3, "indice": 2}}
     ]
   }}
   ```
@@ -785,11 +747,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
         "source_id_ma_legado": "sec_200",
         "accion": "dejar igual",
         "cambio_lista_cambios": null,
-        "elemento_side_by_side": {{
-          "prueba": "Densidad",
-          "indice": 0
-        }},
-        "elemento_metodo_referencia": null
+        "elemento_metodo_propuesto": {{"prueba": "Densidad", "indice": 0, "source_id": 1}}
       }},
       {{
         "orden": 2,
@@ -798,8 +756,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
         "source_id_ma_legado": "sec_201",
         "accion": "dejar igual",
         "cambio_lista_cambios": null,
-        "elemento_side_by_side": null,
-        "elemento_metodo_referencia": null
+        "elemento_metodo_propuesto": null
       }},
       {{
         "orden": 3,
@@ -811,14 +768,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
           "indice": 0,
           "texto": "Actualizar método de impurezas a HPLC-MS"
         }},
-        "elemento_side_by_side": {{
-          "prueba": "Impurezas",
-          "indice": 1
-        }},
-        "elemento_metodo_referencia": {{
-          "prueba": "Impurezas",
-          "indice": 0
-        }}
+        "elemento_metodo_propuesto": {{"prueba": "Impurezas", "indice": 1, "source_id": 2}}
       }},
       {{
         "orden": 4,
@@ -830,14 +780,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
           "indice": 1,
           "texto": "Adicionar prueba de contenido de agua por Karl Fischer"
         }},
-        "elemento_side_by_side": {{
-          "prueba": "Contenido de agua",
-          "indice": 2
-        }},
-        "elemento_metodo_referencia": {{
-          "prueba": "Contenido de agua",
-          "indice": 1
-        }}
+        "elemento_metodo_propuesto": {{"prueba": "Contenido de agua", "indice": 2, "source_id": 3}}
       }}
     ]
   }}

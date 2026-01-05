@@ -187,37 +187,40 @@ CHANGE_CONTROL_ANALYSIS_TOOL_DESCRIPTION = """
   Analiza la información estructurada de control de cambios y genera un plan accionable para actualizar el método analítico.
 
   ## Cuándo usar
-  - Después de que existan los archivos procesados por `change_control_agent`, `side_by_side_agent` y/o `reference_methods_agent`.
+  - Después de que existan los archivos procesados por `legacy_migration_agent`, `change_control_agent` y `side_by_side_agent`.
   - Cuando el supervisor necesita consolidar los cambios propuestos y traducirlos en instrucciones de edición sobre `/new/new_method_final.json`.
   - Úsala una sola vez por ciclo de implementación, una vez que todos los insumos relevantes estén listos.
 
+  ## Insumos Requeridos
+  - **Método legado:** `/actual_method/test_solution_structured_content.json` - Pruebas estructuradas del método actual.
+  - **Control de cambios:** `/new/change_control_summary.json` - Lista de cambios a implementar.
+  - **Método propuesto:** `/proposed_method/test_solution_structured_content.json` - Pruebas estructuradas del método propuesto (de side-by-side o referencia).
+
   ## Buenas Prácticas
-  - **Insumos obligatorios:** Siempre debe estar disponible `/new/change_control.json` y contener las descripciones de cambios.
-  - **Insumos opcionales:** `/new/side_by_side.json` y `/new/reference_methods.json` pueden no existir; la herramienta manejará su ausencia.
+  - **Precondición:** Asegúrate de que los tres archivos estén disponibles en el estado antes de llamar esta herramienta.
   - **Contexto resumido:** No es necesario leer manualmente los archivos grandes; la herramienta los valida y extrae solo los campos necesarios para el LLM.
 
   ## Parámetros
-  - `change_control_path (str)`: Ruta al JSON estructurado del control de cambios. Debe ser siempre `/new/change_control.json`.
-  - `new_method_path (str)`: Ruta al método analítico consolidado sobre el cual se aplicarán los parches. Usualmente `/new/new_method_final.json`.
-  - `side_by_side_path (str)`: Ruta al JSON side-by-side (si existe). Normalmente `/new/side_by_side.json`.
-  - `reference_methods_path (str)`: Ruta al JSON de métodos de referencia (si existe). Por defecto `/new/reference_methods.json`.
+  - `proposed_method_path (str)`: Ruta al método propuesto estructurado. Default `/proposed_method/test_solution_structured_content.json`.
+  - `legacy_method_path (str)`: Ruta al método legado estructurado. Default `/actual_method/test_solution_structured_content.json`.
+  - `change_control_path (str)`: Ruta al resumen del control de cambios. Default `/new/change_control_summary.json`.
 
   ## Salida y Efectos en el Estado
   - **Mensaje de Retorno (ToolMessage):** Resume la cantidad de acciones propuestas para implementar los cambios.
   - **Actualización del Estado:** Crea o reemplaza `/new/change_implementation_plan.json`, con un plan estructurado que incluye:
     - listado de cambios,
     - pruebas afectadas o nuevas,
-    - acción sugerida (`replace`, `append`, `noop`, `investigar`),
-    - JSON Patch propuesto para aplicar sobre el método nuevo.
+    - acción sugerida (`editar`, `adicionar`, `eliminar`, `dejar igual`),
+    - referencias al método propuesto para cada acción.
 
   ## Siguiente Paso Esperado
   - Revisar el plan generado (leer `/new/change_implementation_plan.json`).
-  - Someter cada acción a validación humana si es necesario y, posteriormente, llamar a la herramienta de parcheo (`apply_method_patch`) para aplicar los cambios aprobados.
+  - Llamar a `apply_method_patch` para cada acción del plan para aplicar los cambios.
 """
 
 APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
-  Genera y aplica el contenido completo de una prueba por accion del plan usando la informacion del metodo nuevo,
-  del metodo legado, del side-by-side y de los metodos de referencia.
+  Genera y aplica el contenido completo de una prueba por accion del plan usando la informacion del metodo legado
+  y del metodo propuesto.
   
   ## Cuando usar
   - Despues de obtener el plan en `/new/change_implementation_plan.json` mediante `analyze_change_impact`.
@@ -226,15 +229,14 @@ APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
   
   ## Buenas Practicas
   - Proporciona siempre el `action_index` correcto; revisa el plan antes de llamar a la herramienta.
-  - Asegurate de que los archivos de referencia (`legacy_method`, `side_by_side` y `reference_method`) esten cargados en el estado para
+  - Asegurate de que los archivos de referencia (`legacy_method` y `proposed_method`) esten cargados en el estado para
     que el LLM disponga de contexto completo.
   - La herramienta guarda el resultado en `/new/applied_changes/{action_index}.json` y actualiza `/new/new_method_final.json`.
   
   ## Parametros
   - `plan_path (str)`: Ruta al plan generado por `analyze_change_impact`. Default `/new/change_implementation_plan.json`.
   - `action_index (int)`: Indice (0-based) de la accion a ejecutar.
-  - `side_by_side_path (str)`: Ruta al JSON del analisis side-by-side. Default `/new/side_by_side.json`.
-  - `reference_method_path (str)`: Ruta al JSON de metodos de referencia. Default `/new/reference_methods.json`.
+  - `proposed_method_path (str)`: Ruta al metodo propuesto estructurado. Default `/proposed_method/test_solution_structured_content.json`.
   - `legacy_method_path (str)`: Ruta al metodo legado estructurado. Default `/actual_method/test_solution_structured_content.json`.
   - `new_method_path (str)`: Ruta al metodo consolidado que sera modificado. Default `/new/new_method_final.json`.
   

@@ -28,6 +28,7 @@ from src.prompts.tool_description_prompts import APPLY_METHOD_PATCH_TOOL_DESCRIP
 from src.tools.analyze_change_impact import (
     UnifiedInterventionPlan,
     UnifiedInterventionAction,
+    ElementoMetodoPropuesto,
 )
 from src.models.analytical_method_models import (
     Prueba as MetodoPrueba,
@@ -43,8 +44,6 @@ PLAN_DEFAULT_PATH = "/new/change_implementation_plan.json"
 METHOD_DEFAULT_PATH = "/new/new_method_final.json"
 PATCH_LOG_PATH = "/logs/change_patch_log.jsonl"
 PATCHES_DIR = "/new/applied_changes"
-REFERENCE_METHOD_DEFAULT_PATH = "/new/reference_methods.json"
-SIDE_BY_SIDE_DEFAULT_PATH = "/new/side_by_side.json"
 LEGACY_METHOD_DEFAULT_PATH = "/actual_method/test_solution_structured_content.json"
 PROPOSED_METHOD_DEFAULT_PATH = "/proposed_method/test_solution_structured_content.json"
 method_patch_model = init_chat_model(model="openai:gpt-5-mini", temperature=0)
@@ -63,8 +62,8 @@ APPLY_METHOD_PATCH_SYSTEM = """Eres un quimico especialista en metodos analitico
 Debes generar el objeto `prueba_resultante` listo para insertarse en el metodo destino.
 
 Acciones:
-- editar: parte de la prueba objetivo actual y ajustala segun la descripcion del cambio, aprovechando la evidencia de legacy, side-by-side y metodos de referencia. Respeta o reutiliza el id proporcionado.
-- adicionar: crea una prueba nueva usando el id_sugerido si existe; si falta, genera uno de 8 caracteres hexadecimales. Usa la mejor evidencia disponible.
+- editar: parte de la prueba objetivo actual y ajustala segun la descripcion del cambio, aprovechando la evidencia del metodo legado y el metodo propuesto. Respeta o reutiliza el id proporcionado.
+- adicionar: crea una prueba nueva usando el id_sugerido si existe; si falta, genera uno de 8 caracteres hexadecimales. Usa la mejor evidencia disponible del metodo propuesto.
 - eliminar: conserva la trazabilidad. Devuelve la prueba con el mismo id y una nota clara de eliminacion en `procedimientos` y `especificaciones`.
 - dejar igual: replica la prueba objetivo sin cambios.
 
@@ -97,17 +96,9 @@ ID sugerido: {id_sugerido}
 {prueba_legacy}
 </PRUEBA_LEGACY>
 
-<PRUEBA_SIDE_BY_SIDE_PROPUESTA>
-{prueba_side_propuesta}
-</PRUEBA_SIDE_BY_SIDE_PROPUESTA>
-
-<PRUEBA_METODOS_REFERENCIA>
-{prueba_referencia}
-</PRUEBA_METODOS_REFERENCIA>
-
-<FUENTES_PLAN>
-{pruebas_fuente_plan}
-</FUENTES_PLAN>
+<PRUEBA_METODO_PROPUESTO>
+{prueba_propuesta}
+</PRUEBA_METODO_PROPUESTO>
 
 <METADATOS_METODO_DESTINO>
 {metadatos_metodo}
@@ -411,32 +402,6 @@ def _find_prueba_data(pruebas: list[Any] | None, target_id: Optional[str], targe
     return data
 
 
-def _resolve_reference_context(
-    fuentes: list,
-    side_by_side_payload: Optional[dict[str, Any]],
-    reference_payload: Optional[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    details: list[dict[str, Any]] = []
-    for fuente in fuentes:
-        origen = getattr(fuente, "origen", None) or "desconocido"
-        dataset: list[Any] | None = None
-        if origen == "side_by_side_actual":
-            dataset = (side_by_side_payload or {}).get("metodo_actual")
-        elif origen == "side_by_side_modificacion":
-            dataset = (side_by_side_payload or {}).get("metodo_modificacion_propuesta")
-        elif origen == "reference_method":
-            dataset = (reference_payload or {}).get("pruebas")
-
-        contenido = _find_prueba_data(dataset, getattr(fuente, "id_prueba", None), getattr(fuente, "prueba", None))
-        details.append(
-            {
-                "origen": origen,
-                "id_prueba": getattr(fuente, "id_prueba", None),
-                "prueba": getattr(fuente, "prueba", None),
-                "contenido": contenido,
-            }
-        )
-    return details
 
 
 def _build_method_summary(method_payload: dict[str, Any]) -> dict[str, Any]:
@@ -500,9 +465,7 @@ def apply_method_patch(
     tool_call_id: Annotated[str, InjectedToolCallId],
     plan_path: str = PLAN_DEFAULT_PATH,
     action_index: int = 0,
-    side_by_side_path: str = SIDE_BY_SIDE_DEFAULT_PATH,
     proposed_method_path: str = PROPOSED_METHOD_DEFAULT_PATH,
-    reference_method_path: str = REFERENCE_METHOD_DEFAULT_PATH,
     legacy_method_path: str = LEGACY_METHOD_DEFAULT_PATH,
     new_method_path: str = METHOD_DEFAULT_PATH,
 ) -> Command:
@@ -534,20 +497,14 @@ def apply_method_patch(
     target_id = action.source_id_ma_legado
     target_name = action.prueba_ma_legado
     
-    # Extraer referencias de side_by_side y metodo_referencia
-    id_side = None
-    name_side = None
-    idx_side = None
-    if action.elemento_side_by_side:
-        name_side = action.elemento_side_by_side.prueba
-        idx_side = action.elemento_side_by_side.indice
-    
-    id_ref = None
-    name_ref = None
-    idx_ref = None
-    if action.elemento_metodo_referencia:
-        name_ref = action.elemento_metodo_referencia.prueba
-        idx_ref = action.elemento_metodo_referencia.indice
+    # Extraer referencia del método propuesto
+    name_propuesto = None
+    idx_propuesto = None
+    source_id_propuesto = None
+    if action.elemento_metodo_propuesto:
+        name_propuesto = action.elemento_metodo_propuesto.prueba
+        idx_propuesto = action.elemento_metodo_propuesto.indice
+        source_id_propuesto = action.elemento_metodo_propuesto.source_id
 
     # Cargar método base: primero intentar el nuevo, si no existe usar el legado
     method_payload = _load_json_payload(files, new_method_path)
@@ -599,48 +556,25 @@ def apply_method_patch(
         logger.error(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    raw_side_by_side_payload = _load_json_payload(files, side_by_side_path)
+    # Cargar payloads de fuentes
     proposed_payload = _load_json_payload(files, proposed_method_path)
-    if proposed_payload:
-        side_by_side_payload = {"metodo_modificacion_propuesta": proposed_payload}
-        logger.info("Usando metodo propuesto de /proposed_method/ para side-by-side.")
-    else:
-        side_by_side_payload = raw_side_by_side_payload
-    reference_payload = _load_json_payload(files, reference_method_path)
     legacy_payload = _load_json_payload(files, legacy_method_path)
 
     # Extraer lista de pruebas del legado (puede ser lista directa o dict con "pruebas"/"tests")
     legacy_pruebas_list = _extract_pruebas_list(legacy_payload)
     legacy_prueba = _find_prueba_data(legacy_pruebas_list, target_id, target_name)
     
-    # Buscar en side_by_side usando índice o nombre (solo metodo_modificacion_propuesta)
-    side_propuesta = None
-    if side_by_side_payload and isinstance(side_by_side_payload, dict):
-        metodo_propuesta_list = _extract_pruebas_list(side_by_side_payload.get("metodo_modificacion_propuesta") or [])
-        if idx_side is not None and 0 <= idx_side < len(metodo_propuesta_list):
-            side_propuesta = metodo_propuesta_list[idx_side]
-        elif name_side:
-            side_propuesta = _find_prueba_data(metodo_propuesta_list, None, name_side)
-    
-    # Buscar en reference_methods usando índice o nombre
-    ref_prueba = None
-    if reference_payload:
-        ref_pruebas_list = _extract_pruebas_list(reference_payload)
-        if idx_ref is not None and 0 <= idx_ref < len(ref_pruebas_list):
-            ref_prueba = ref_pruebas_list[idx_ref]
-        elif name_ref:
-            ref_prueba = _find_prueba_data(ref_pruebas_list, None, name_ref)
-
-    fuentes_contexto = []
-    if legacy_prueba:
-        fuentes_contexto.append({"origen": "metodo_legacy", "contenido": legacy_prueba})
-    if side_propuesta:
-        fuentes_contexto.append({"origen": "side_by_side_modificacion", "contenido": side_propuesta})
-    if ref_prueba:
-        fuentes_contexto.append({"origen": "reference_method", "contenido": ref_prueba})
+    # Buscar en método propuesto usando índice o nombre
+    prueba_propuesta = None
+    if proposed_payload:
+        proposed_pruebas_list = _extract_pruebas_list(proposed_payload)
+        if idx_propuesto is not None and 0 <= idx_propuesto < len(proposed_pruebas_list):
+            prueba_propuesta = proposed_pruebas_list[idx_propuesto]
+        elif name_propuesto:
+            prueba_propuesta = _find_prueba_data(proposed_pruebas_list, None, name_propuesto)
 
     method_summary = _build_method_summary(method_json)
-    suggested_id = target_id or id_side or id_ref
+    suggested_id = target_id
 
     if accion_normalizada == "dejar igual":
         summary_message = f"Accion #{action_index}: se mantiene sin cambios la prueba objetivo (id: {target_id})."
@@ -694,9 +628,7 @@ def apply_method_patch(
         id_sugerido=suggested_id or "(sin id sugerido)",
         prueba_objetivo=_pretty_json(target_prueba),
         prueba_legacy=_pretty_json(legacy_prueba),
-        prueba_side_propuesta=_pretty_json(side_propuesta),
-        prueba_referencia=_pretty_json(ref_prueba),
-        pruebas_fuente_plan=_pretty_json(fuentes_contexto),
+        prueba_propuesta=_pretty_json(prueba_propuesta),
         metadatos_metodo=_pretty_json(method_summary),
     )
 
