@@ -12,6 +12,8 @@ warnings.filterwarnings(
 
 import json
 import logging
+import re
+import unicodedata
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Annotated, Any, Optional, List, Tuple
@@ -24,12 +26,33 @@ from pydantic import ValidationError
 
 from src.graph.state import DeepAgentState
 from src.prompts.tool_description_prompts import CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION
-from src.models.analytical_method_models import MetodoAnaliticoNuevo
+# Ya no se usa MetodoAnaliticoNuevo - trabajamos directamente con dicts de TestSolution
 
 logger = logging.getLogger(__name__)
 
 PATCHES_DIR_DEFAULT = "/new/applied_changes"
 METHOD_DEFAULT_PATH = "/new/new_method_final.json"
+LEGACY_METADATA_DEFAULT_PATH = "/actual_method/method_metadata_TOC.json"
+
+# Campos de metadata que se copian del método legado al método final
+METADATA_FIELDS = [
+    "apis",
+    "tipo_metodo",
+    "nombre_producto",
+    "numero_metodo",
+    "version_metodo",
+    "codigo_producto",
+    "objetivo",
+    "alcance_metodo",
+    "definiciones",
+    "recomendaciones_seguridad",
+    "materiales",
+    "equipos",
+    "anexos",
+    "autorizaciones",
+    "documentos_soporte",
+    "historico_cambios",
+]
 
 
 def _load_json_payload(files: dict[str, Any], path: str) -> Optional[dict[str, Any] | list]:
@@ -69,28 +92,83 @@ def _load_json_payload(files: dict[str, Any], path: str) -> Optional[dict[str, A
 
 
 def _normalize_text(value: Optional[str]) -> Optional[str]:
+    """Normaliza texto para comparación: minúsculas, sin acentos, sin espacios extra."""
     if not value:
         return None
-    return " ".join(value.strip().lower().split())
+    # Remover acentos
+    normalized = unicodedata.normalize('NFD', value)
+    normalized = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+    return " ".join(normalized.strip().lower().split())
+
+
+def _normalize_for_matching(value: Optional[str]) -> Optional[str]:
+    """
+    Normaliza texto para matching flexible:
+    - Minúsculas, sin acentos
+    - Remueve números de sección (ej: '7.1', '7.1.2')
+    """
+    if not value:
+        return None
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+    # Remover números de sección al inicio
+    normalized = re.sub(r'^\d+(\.\d+)*\s*', '', normalized)
+    return normalized.strip()
 
 
 def _find_prueba_entry(
     pruebas: list[Any] | None, target_id: Optional[str], target_name: Optional[str]
 ) -> tuple[Optional[int], Optional[dict[str, Any]]]:
+    """
+    Busca una prueba por section_id o por nombre (test_name/section_title).
+    Soporta tanto formato TestSolution (section_id, test_name) como formato legacy (id_prueba, prueba).
+    
+    Usa matching flexible:
+    1. Primero busca por ID exacto
+    2. Luego busca por nombre exacto (normalizado)
+    3. Luego busca por nombre flexible (sin números de sección, sin acentos)
+    4. Finalmente busca por contenido parcial
+    """
     if not pruebas:
         return None, None
 
     normalized_target = _normalize_text(target_name)
+    flexible_target = _normalize_for_matching(target_name)
 
+    # Buscar por ID (section_id o id_prueba)
     if target_id:
         for idx, raw in enumerate(pruebas):
-            if isinstance(raw, dict) and raw.get("id_prueba") == target_id:
-                return idx, raw
+            if isinstance(raw, dict):
+                data_id = raw.get("section_id") or raw.get("id_prueba")
+                if data_id == target_id:
+                    return idx, raw
 
+    # Buscar por nombre exacto (normalizado)
     if normalized_target:
         for idx, raw in enumerate(pruebas):
-            if isinstance(raw, dict) and _normalize_text(raw.get("prueba")) == normalized_target:
-                return idx, raw
+            if isinstance(raw, dict):
+                data_name = raw.get("test_name") or raw.get("section_title") or raw.get("prueba")
+                if _normalize_text(data_name) == normalized_target:
+                    return idx, raw
+
+    # Buscar por nombre flexible (sin números de sección)
+    if flexible_target:
+        for idx, raw in enumerate(pruebas):
+            if isinstance(raw, dict):
+                data_name = raw.get("test_name") or raw.get("section_title") or raw.get("prueba")
+                data_flexible = _normalize_for_matching(data_name)
+                if data_flexible and data_flexible == flexible_target:
+                    return idx, raw
+
+    # Buscar por contenido parcial
+    if flexible_target:
+        for idx, raw in enumerate(pruebas):
+            if isinstance(raw, dict):
+                data_name = raw.get("test_name") or raw.get("section_title") or raw.get("prueba")
+                data_flexible = _normalize_for_matching(data_name)
+                if data_flexible and (flexible_target in data_flexible or data_flexible in flexible_target):
+                    return idx, raw
 
     return None, None
 
@@ -112,6 +190,7 @@ def consolidate_new_method(
     tool_call_id: Annotated[str, InjectedToolCallId],
     patches_dir: str = PATCHES_DIR_DEFAULT,
     base_method_path: str = METHOD_DEFAULT_PATH,
+    legacy_metadata_path: str = LEGACY_METADATA_DEFAULT_PATH,
     output_path: str = METHOD_DEFAULT_PATH,
 ) -> Command:
     logger.info("Iniciando 'consolidate_new_method'")
@@ -141,14 +220,18 @@ def consolidate_new_method(
         logger.error(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    try:
-        base_model = MetodoAnaliticoNuevo(**base_payload)
-    except ValidationError as exc:
-        msg = f"El metodo base no cumple el esquema esperado: {exc}"
-        logger.exception(msg)
-        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+    # Cargar metadata del método legado
+    legacy_metadata = _load_json_payload(source_files, legacy_metadata_path)
+    metadata_loaded = False
+    if legacy_metadata and isinstance(legacy_metadata, dict):
+        logger.info(f"Metadata del método legado cargada desde {legacy_metadata_path}")
+        metadata_loaded = True
+    else:
+        logger.warning(f"No se encontró metadata del método legado en {legacy_metadata_path}")
+        legacy_metadata = {}
 
-    working_method = base_model.model_dump(mode="json")
+    # Trabajar directamente con el dict sin validación Pydantic
+    working_method = base_payload
     patches = _iter_patch_payloads(source_files, patches_dir)
     consolidated_patch_paths: list[str] = [path for path, _ in patches]
 
@@ -190,23 +273,34 @@ def consolidate_new_method(
         else:
             skipped += 1
 
-    try:
-        validated = MetodoAnaliticoNuevo(**working_method)
-    except ValidationError as exc:
-        msg = f"El metodo consolidado no paso la validacion: {exc}"
-        logger.exception(msg)
-        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
-
-    method_dump = validated.model_dump(mode="json")
+    # Fusionar metadata del método legado con las pruebas consolidadas
+    # La metadata del método legado tiene prioridad para los campos de metadata
+    # Las pruebas vienen del working_method (ya con los patches aplicados)
+    final_method: dict[str, Any] = {}
+    
+    # Copiar campos de metadata desde el método legado
+    metadata_fields_copied = 0
+    for field in METADATA_FIELDS:
+        if field in legacy_metadata and legacy_metadata[field] is not None:
+            final_method[field] = legacy_metadata[field]
+            metadata_fields_copied += 1
+    
+    # Agregar las pruebas consolidadas
+    final_method["pruebas"] = working_method.get("pruebas", [])
+    
+    logger.info(f"Metadata copiada: {metadata_fields_copied} campos de {len(METADATA_FIELDS)} posibles")
+    
+    method_dump = final_method
     method_str = json.dumps(method_dump, ensure_ascii=False, indent=2)
 
     # Resultado final: base_files + método consolidado
     files_update = base_files.copy()
     files_update[output_path] = {"content": method_str, "data": method_dump, "modified_at": datetime.now(timezone.utc).isoformat()}
 
+    metadata_msg = f", metadata copiada: {metadata_fields_copied} campos" if metadata_loaded else ", sin metadata"
     tool_message = (
         f"Metodo consolidado en {output_path}. "
-        f"Aplicadas: {applied}, omitidas: {skipped}, no encontradas: {missing}, parches leidos: {len(patches)}."
+        f"Aplicadas: {applied}, omitidas: {skipped}, no encontradas: {missing}, parches leidos: {len(patches)}{metadata_msg}."
     )
     logger.info(tool_message)
 

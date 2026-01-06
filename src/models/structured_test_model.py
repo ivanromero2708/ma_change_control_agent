@@ -423,6 +423,122 @@ class TestSolutions(BaseModel):
         )
     )
 
+#######################################################################################
+# Método Analítico Completo
+#######################################################################################
+
+from .analytical_method_models import TipoMetodo
+from .analytical_method_models import AlcanceMetodo
+from .analytical_method_models import Equipo
+from .analytical_method_models import Anexo
+from .analytical_method_models import Autorizacion
+from .analytical_method_models import DocumentoSoporte
+from .analytical_method_models import HistoricoCambio
+
+class MetodoAnaliticoFinal(BaseModel):
+    apis: Optional[List[str]] = Field(
+        None,
+        description="Listado de ingredientes activos (APIs) del producto, si se indican en el método.",
+    )
+    tipo_metodo: Optional[TipoMetodo] = Field(
+        None,
+        description=(
+            "Tipo de método según el encabezado o portada. Seleccionar una de las opciones definidas "
+            "('MÉTODO DE ANÁLISIS DE PRODUCTO TERMINADO', 'MÉTODO DE ANÁLISIS DE MATERIA PRIMA', "
+            "'MÉTODO DE ANÁLISIS DE PROCESO'), tal como aparece en el documento."
+        ),
+    )
+    nombre_producto: Optional[str] = Field(
+        None,
+        description=(
+            "Nombre comercial/técnico del producto en el encabezado. Mantener potencia si está en la misma línea. "
+            "Ej.: 'PROGESTERONA 100 mg'."
+        ),
+    )
+    numero_metodo: Optional[str] = Field(
+        None,
+        description=(
+            "Identificador del método indicado como 'Método No', 'CÓDIGO', 'MÉTODO', etc. "
+            "Ej.: '01-3608'. Devolverlo tal como aparece."
+        ),
+    )
+    version_metodo: Optional[str] = Field(
+        None,
+        description=(
+            "Versión del método indicada en el encabezado o portada. Ej.: '01'. Solo el valor literal."
+        ),
+    )
+    codigo_producto: Optional[str] = Field(
+        None,
+        description=(
+            "Código del producto en el encabezado o tabla de alcance (columna 'Código'/'Código Nuevo'). "
+            "Ej.: '400002641'."
+        ),
+    )
+    objetivo: Optional[str] = Field(
+        None,
+        description=(
+            "Párrafo completo bajo el encabezado '1. OBJETIVO' o equivalente, hasta el siguiente encabezado numerado."
+        ),
+    )
+    alcance_metodo: Optional[AlcanceMetodo] = Field(
+        None,
+        description="Sección '2. ALCANCE' con texto general y tabla/listado de productos.",
+    )
+    definiciones: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Lista de siglas/definiciones bajo '3. DEFINICIONES' o similares. "
+            "Una entrada por línea/viñeta."
+        ),
+    )
+    recomendaciones_seguridad: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Viñetas completas bajo 'RECOMENDACIONES CLAVES, PRECAUCIONES Y ADVERTENCIAS' "
+            "o sección equivalente. Una entrada por viñeta."
+        ),
+    )
+    materiales: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Lista de materiales y reactivos globales del método ('MATERIALES Y REACTIVOS'). "
+            "Una entrada por línea/viñeta."
+        ),
+    )
+    equipos: Optional[List[Equipo]] = Field(
+        None,
+        description=(
+            "Tabla/listado de 'EQUIPOS' con nombre y marca/modelo para cada equipo."
+        ),
+    )
+    pruebas: Optional[List[TestSolution]] = Field(
+        None,
+        description="Pruebas analíticas extraídas del método."
+    )
+    anexos: Optional[List[Anexo]] = Field(
+        None,
+        description="Tabla/listado de ANEXOS con número y descripción.",
+    )
+    autorizaciones: Optional[List[Autorizacion]] = Field(
+        None,
+        description=(
+            "Bloque de texto con las firmas de ELABORADO/REVISADO/APROBADO, incluyendo nombres y cargos, "
+            "tal como aparece en la sección de autorizaciones."
+        ),
+    )
+    documentos_soporte: Optional[List[DocumentoSoporte]] = Field(
+        None,
+        description=(
+            "Texto o tabla de DOCUMENTOS SOPORTE con número, fuente y descripción, tal cual se muestra en el método."
+        ),
+    )
+    historico_cambios: Optional[List[HistoricoCambio]] = Field(
+        None,
+        description=(
+            "Texto o tabla de HISTÓRICO DE CAMBIOS con código, versión, fecha y descripción completa del cambio."
+        ),
+    )
 
 #######################################################################################
 # Constantes para el prompt

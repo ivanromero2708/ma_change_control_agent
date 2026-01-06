@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from enum import Enum
 
 class ActividadEvaluacion(BaseModel):
     id: Optional[str] = Field(default=None, description="ID de la actividad de evaluación.")
@@ -41,6 +42,66 @@ class DescripcionCambio(BaseModel):
     """Descripción del cambio"""
     prueba: Optional[str] = Field(default=None, description="Prueba a la que se aplica el cambio.")
     texto: Optional[str] = Field(default=None, description="Descripción del cambio que le será realizado a la prueba.")
+
+
+# ============================================================================
+# Modelos para extracción estructurada de cambios (ControlCambioOutput)
+# ============================================================================
+
+class TipoCambio(str, Enum):
+    """Tipo de cambio aplicado a una prueba analítica."""
+    ACTUALIZACION = "ACTUALIZACIÓN"
+    ELIMINACION = "ELIMINACIÓN"
+    SIN_CAMBIO = "SIN_CAMBIO"
+
+
+class CambioPruebaAnalitica(BaseModel):
+    """Representa un cambio específico en una prueba analítica existente."""
+    prueba: str = Field(description="Nombre exacto de la prueba analítica")
+    tipo_cambio: TipoCambio = Field(description="Tipo de cambio: ACTUALIZACIÓN, ELIMINACIÓN o SIN_CAMBIO")
+    criterio_actual: Optional[str] = Field(default=None, description="Valor/límite actual con unidades")
+    criterio_propuesto: Optional[str] = Field(default=None, description="Valor/límite propuesto con unidades")
+    metodologia_actual: Optional[str] = Field(default=None, description="Metodología actual (Titulación, HPLC, IR, etc.)")
+    metodologia_propuesta: Optional[str] = Field(default=None, description="Metodología propuesta")
+    referencia: Optional[str] = Field(default=None, description="Referencia farmacopeica (USP, COFA, Interna, etc.)")
+
+
+class PruebaNueva(BaseModel):
+    """Representa una prueba analítica nueva que se incorpora."""
+    prueba: str = Field(description="Nombre de la prueba nueva")
+    criterio: str = Field(description="Criterio de aceptación")
+    metodologia: str = Field(description="Metodología analítica")
+    referencia: Optional[str] = Field(default=None, description="Referencia farmacopeica")
+
+
+class ProductoAfectado(BaseModel):
+    """Producto afectado por el control de cambios."""
+    codigo: str = Field(description="Código del producto")
+    nombre: str = Field(description="Nombre del producto")
+
+
+class MateriaPrima(BaseModel):
+    """Información de la materia prima afectada."""
+    codigo: str = Field(description="Código de la materia prima")
+    nombre: str = Field(description="Nombre de la materia prima")
+
+
+class ControlCambioOutput(BaseModel):
+    """Modelo de salida estructurada para extracción de control de cambios."""
+    filename: str = Field(description="Nombre del archivo a almacenar (ej: CC-001_resumen_cambios.md)")
+    summary: str = Field(max_length=500, description="Resumen conciso en 1-2 oraciones del propósito de los cambios")
+    materia_prima: Optional[MateriaPrima] = Field(default=None, description="Materia prima afectada por el cambio")
+    productos_afectados: List[ProductoAfectado] = Field(default_factory=list, description="Lista de productos afectados")
+    cambios_pruebas_analiticas: List[CambioPruebaAnalitica] = Field(
+        default_factory=list,
+        description="Lista de cambios en pruebas analíticas existentes"
+    )
+    pruebas_nuevas: List[PruebaNueva] = Field(
+        default_factory=list,
+        description="Lista de pruebas nuevas a incorporar"
+    )
+    prerrequisitos: List[str] = Field(default_factory=list, description="Prerrequisitos para implementar el cambio")
+    notas_operativas: List[str] = Field(default_factory=list, description="Notas operativas adicionales")
 
 class ChangeControlModel(BaseModel):
     # Encabezado

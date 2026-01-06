@@ -77,12 +77,7 @@ summary_filenames = {
     "reference_methods": "/new/reference_methods_summary.json",
 }
 
-# Modelos de datos requeridos
-
-class ChangeControlStrOutput(BaseModel):
-    filename: str = Field(description="Nombre del archivo a almacenar.")
-    summary: str = Field(description="Resumen en lenguaje natural del documento.")
-    lista_cambios: List[str] = Field(description="Lista de cambios del método analítico estructurada.")
+# Nota: ControlCambioOutput se importa desde src.models
 
 # Funciones de utilidad
 
@@ -383,7 +378,7 @@ def _get_summary_object(
     model_instance: Union[BaseModel, Dict[str, Any], None],
     structured_extraction_prompt: str,
     document_type: Literal["change_control", "side_by_side", "reference_methods"],
-) -> Union[ChangeControlStrOutput, Dict[str, Any]]:
+) -> Union[ControlCambioOutput, Dict[str, Any]]:
     """Genera un objeto pequeño con el resumen legible del documento."""
 
     extracted_content: Dict[str, Any] = _model_instance_to_dict(model_instance)
@@ -394,7 +389,7 @@ def _get_summary_object(
             if not relevant_context:
                 raise ValueError("No se extrajeron datos del documento.")
 
-            structured_model = structured_extraction_model.with_structured_output(ChangeControlStrOutput)
+            structured_model = structured_extraction_model.with_structured_output(ControlCambioOutput)
 
             summary_and_filename = structured_model.invoke([
                 HumanMessage(
@@ -408,10 +403,11 @@ def _get_summary_object(
         except Exception as exc:
             logger.warning("Fallo al generar resumen estructurado: %s", exc)
             serialized = json.dumps(extracted_content, ensure_ascii=False, default=str)
-            return ChangeControlStrOutput(
+            return ControlCambioOutput(
                 filename="No se extrajeron datos del documento.json",
-                summary=serialized[:1000] + "..." if len(serialized) > 1000 else serialized,
-                lista_cambios=[],
+                summary=serialized[:500] + "..." if len(serialized) > 500 else serialized,
+                cambios_pruebas_analiticas=[],
+                pruebas_nuevas=[],
             )
 
     if document_type == "side_by_side":

@@ -488,34 +488,46 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   <estructura_entrada>
   Recibirás un contexto JSON con:
 
-  **pruebas_metodo_legado**: Lista ordenada de pruebas del método legado
+  **pruebas_metodo_legado**: Lista ordenada de pruebas del método legado (de `/actual_method/test_solution_structured_content.json`)
   ```json
   [
     {{
       "prueba": "Nombre de la prueba",
-      "source_id": "section_id del JSON estructurado",
+      "source_id": 1,
       "indice": 0
     }}
   ]
   ```
 
-  **lista_cambios**: Cambios del control de cambios
+  **lista_cambios**: Cambios estructurados del control de cambios (de `/new/change_control_summary.json`)
   ```json
-  [
-    {{
-      "indice": 0,
-      "prueba": "Nombre de prueba afectada",
-      "texto": "Descripción completa del cambio"
-    }}
-  ]
+  {{
+    "cambios_pruebas_analiticas": [
+      {{
+        "prueba": "Nombre de prueba afectada",
+        "tipo_cambio": "ACTUALIZACIÓN | ELIMINACIÓN | SIN_CAMBIO",
+        "criterio_actual": "...",
+        "criterio_propuesto": "...",
+        "referencia": "USP | COFA | Interna"
+      }}
+    ],
+    "pruebas_nuevas": [
+      {{
+        "prueba": "Nombre de prueba nueva",
+        "criterio": "...",
+        "metodologia": "...",
+        "referencia": "..."
+      }}
+    ]
+  }}
   ```
 
-  **pruebas_metodo_propuesto**: Pruebas del método propuesto (de /proposed_method/test_solution_structured_content.json)
+  **pruebas_metodo_propuesto**: Pruebas del método propuesto (de `/proposed_method/test_solution_structured_content.json`)
   ```json
   [
     {{
       "prueba": "Nombre de la prueba",
-      "source_id": "source_id del wrapper en el JSON",
+      "source_id": 1,
       "indice": 0
     }}
   ]
@@ -533,7 +545,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
         "orden": 1,
         "cambio": "Descripción concisa del cambio a implementar",
         "prueba_ma_legado": "Nombre de la prueba legada o null si es nueva",
-        "source_id_ma_legado": "section_id de /actual_method/test_solution_structured_content.json o null",
+        "source_id_ma_legado": 1,
         "accion": "editar | adicionar | eliminar | dejar igual",
         "cambio_lista_cambios": {{
           "indice": 0,
@@ -562,8 +574,8 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
 
   <regla_2_campos_requeridos>
   - **prueba_ma_legado**: Nombre exacto de la prueba del método legado. Usa `null` SOLO si `accion = "adicionar"`
-  - **source_id_ma_legado**: El `section_id` que permite filtrar en `/actual_method/test_solution_structured_content.json`. Usa `null` solo para pruebas nuevas
-  - **cambio_lista_cambios**: Siempre incluye `indice` y `texto` del cambio aplicable. Usa `null` SOLO si la acción es "dejar igual"
+  - **source_id_ma_legado**: El `source_id` numérico del wrapper que permite filtrar en `/actual_method/test_solution_structured_content.json`. Usa `null` solo para pruebas nuevas
+  - **cambio_lista_cambios**: Incluye `indice` (posición en cambios_pruebas_analiticas o pruebas_nuevas) y `texto` (descripción del cambio). Usa `null` SOLO si la acción es "dejar igual"
   - **elemento_metodo_propuesto**: Incluye `prueba`, `indice` y `source_id` para filtrar en `/proposed_method/test_solution_structured_content.json`. Usa `null` si no aplica (ej: eliminar)
   </regla_2_campos_requeridos>
 
@@ -619,8 +631,8 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   ```json
   {{
     "pruebas_metodo_legado": [
-      {{"prueba": "Apariencia", "source_id": "sec_001", "indice": 0}},
-      {{"prueba": "pH", "source_id": "sec_002", "indice": 1}}
+      {{"prueba": "Apariencia", "source_id": 1, "indice": 0}},
+      {{"prueba": "pH", "source_id": 2, "indice": 1}}
     ],
     "lista_cambios": [
       {{"indice": 0, "prueba": "pH", "texto": "Cambiar límite de pH de 6.5-7.5 a 6.0-8.0"}}
@@ -641,7 +653,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
         "orden": 1,
         "cambio": "Mantener prueba de Apariencia sin cambios",
         "prueba_ma_legado": "Apariencia",
-        "source_id_ma_legado": "sec_001",
+        "source_id_ma_legado": 1,
         "accion": "dejar igual",
         "cambio_lista_cambios": null,
         "elemento_metodo_propuesto": {{"prueba": "Apariencia", "indice": 0, "source_id": 1}}
@@ -650,7 +662,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
         "orden": 2,
         "cambio": "Actualizar límites de pH de 6.5-7.5 a 6.0-8.0",
         "prueba_ma_legado": "pH",
-        "source_id_ma_legado": "sec_002",
+        "source_id_ma_legado": 2,
         "accion": "editar",
         "cambio_lista_cambios": {{
           "indice": 0,
@@ -668,7 +680,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
   ```json
   {{
     "pruebas_metodo_legado": [
-      {{"prueba": "Valoración", "source_id": "sec_100", "indice": 0}}
+      {{"prueba": "Valoración", "source_id": 1, "indice": 0}}
     ],
     "lista_cambios": [
       {{"indice": 0, "prueba": "Valoración", "texto": "Eliminar prueba de Valoración"}},
@@ -689,7 +701,7 @@ UNIFIED_CHANGE_SYSTEM_ANALYSIS_PROMPT = """
         "orden": 1,
         "cambio": "Eliminar prueba de Valoración según control de cambios",
         "prueba_ma_legado": "Valoración",
-        "source_id_ma_legado": "sec_100",
+        "source_id_ma_legado": 1,
         "accion": "eliminar",
         "cambio_lista_cambios": {{
           "indice": 0,
@@ -815,55 +827,145 @@ UNIFIED_CHANGE_HUMAN_ANALYSIS_PROMPT = """
 #############################################################################################################
 
 STRUCTURED_EXTRACTION_CHANGE_CONTROL = """
-  Eres un asistente experto en análisis de documentos de control de cambios (CC) farmacéuticos.
-  Tu tarea es leer el texto de entrada, que describe los cambios realizados, y extraer la información clave en un formato JSON estructurado.
+Eres un asistente experto en análisis de documentos de control de cambios (CC) farmacéuticos.
+Tu tarea es extraer información **específica sobre las pruebas analíticas impactadas** del texto de entrada.
 
-  Debes generar un JSON que se ajuste perfectamente al siguiente modelo de datos:
+## INSTRUCCIONES CRÍTICAS
 
-  ```json
-  {{
-    "filename": "CC-001_resumen_cambios.md",
-    "summary": "Un resumen conciso en lenguaje natural de los cambios descritos.",
-    "lista_cambios": [
-      "Descripción textual del primer cambio",
-      "Descripción textual del segundo cambio",
-      "..."
-    ]
-  }}
-  ````
+1. **ENFÓCATE EN LAS PRUEBAS ANALÍTICAS**: Tu objetivo principal es identificar CADA prueba analítica mencionada y categorizar exactamente qué le sucede.
 
-  # Reglas de Generación de Campos
+2. **CATEGORIZA CADA CAMBIO** en uno de estos tipos:
+   - `ACTUALIZACIÓN`: Se modifica criterio de aceptación, metodología o referencia
+   - `ELIMINACIÓN`: La prueba se remueve de la especificación
+   - `SIN_CAMBIO`: Se menciona pero no cambia
 
-  Debes seguir estas reglas estrictamente:
+3. **EXTRAE VALORES CONCRETOS**: Para cada prueba, extrae:
+   - El criterio de aceptación ACTUAL (valores numéricos, límites)
+   - El criterio de aceptación PROPUESTO (valores numéricos, límites)
+   - La metodología (Titulación, HPLC, IR, UV, GC, etc.)
+   - La referencia (USP, COFA, Interna)
 
-  **`filename`**:
+4. **NO COPIES TEXTO VERBATIM**: Sintetiza y estructura. Si dice "Se actualiza la redacción del criterio de aceptación de acuerdo con lo establecido en la USP vigente", tu output debe ser el VALOR concreto del criterio, no la descripción del cambio.
 
-    * Genera un nombre de archivo descriptivo basado en el contenido.
-    * Debe ser corto, usar guiones bajos (`_`) en lugar de espacios, y terminar en `.md`.
-    * Por ejemplo: `CC-00123_actualizacion_limites.md`.
+5. **PRUEBAS NUEVAS**: Si el documento menciona que se ADICIONA o INCORPORA una prueba que no existía antes, agrégala en `pruebas_nuevas`.
 
-  **`summary`**:
+## MODELO DE SALIDA JSON
 
-    * Escribe un resumen muy conciso, en una o dos frases, que describa el propósito general de los cambios.
-    * Ejemplo: "Actualización de los criterios de aceptación para la prueba de Dureza y ajuste del procedimiento de Disolución."
+```json
+{{
+  "filename": "CC-XXXXX_resumen_cambios.md",
+  "summary": "Resumen conciso en máximo 2 oraciones del propósito de los cambios",
+  "materia_prima": {{
+    "codigo": "Código de la materia prima (ej: 100000346)",
+    "nombre": "Nombre de la materia prima (ej: NAPROXEN SODICO)"
+  }},
+  "productos_afectados": [
+    {{"codigo": "Código del producto", "nombre": "Nombre del producto"}}
+  ],
+  "cambios_pruebas_analiticas": [
+    {{
+      "prueba": "Nombre exacto de la prueba",
+      "tipo_cambio": "ACTUALIZACIÓN | ELIMINACIÓN | SIN_CAMBIO",
+      "criterio_actual": "Valor/límite actual o null si no se especifica",
+      "criterio_propuesto": "Valor/límite propuesto o null si no aplica",
+      "metodologia_actual": "Metodología actual o null",
+      "metodologia_propuesta": "Metodología propuesta o null",
+      "referencia": "USP | COFA | Interna | null"
+    }}
+  ],
+  "pruebas_nuevas": [
+    {{
+      "prueba": "Nombre de la prueba nueva",
+      "criterio": "Criterio de aceptación",
+      "metodologia": "Metodología analítica",
+      "referencia": "Referencia farmacopeica o null"
+    }}
+  ],
+  "prerrequisitos": ["Lista de prerrequisitos como Verificación analítica, etc."],
+  "notas_operativas": ["Notas adicionales relevantes para la implementación"]
+}}
+```
 
-  **`lista_cambios`**:
+## REGLAS DE GENERACIÓN DE CAMPOS
 
-    * Esta es la tarea principal. Lee atentamente el texto de entrada.
-    * Extrae cada cambio individual o "ítem de cambio" descrito como un **string separado** en la lista.
-    * Copia el texto del cambio tan literalmente como sea posible, incluyendo detalles técnicos, valores antiguos y valores nuevos.
-    * Si un cambio menciona la "justificación", inclúyela como parte del string de descripción del cambio.
-    * Si el texto de entrada describe 5 cambios distintos, la `lista_cambios` debe contener 5 strings.
+**`filename`**:
+- Genera un nombre descriptivo basado en el código del CC.
+- Formato: `CC-XXXXX_resumen_cambios.md` donde XXXXX es el código del control de cambios.
 
-  # Texto de Entrada (Control de Cambio)
+**`summary`**:
+- Máximo 2 oraciones describiendo el propósito general.
+- Ejemplo: "Actualización de criterios de aceptación para pruebas de Descripción, Identificación y Valoración según USP vigente. Se elimina la prueba de Identificación UV."
 
-  El texto a continuación contiene la descripción detallada de los cambios.
+**`materia_prima`**:
+- Extrae el código y nombre de la materia prima afectada.
+- Si no se menciona, usa `null`.
 
-  <descripcion_detallada_cambio>
-  {metadata_content}
-  </descripcion_detallada_cambio>
+**`productos_afectados`**:
+- Lista de productos terminados afectados por el cambio.
+- Extrae código y nombre de cada uno.
 
-  Genera el JSON estructurado basado *únicamente* en el texto de entrada.
+**`cambios_pruebas_analiticas`**:
+- **CRÍTICO**: Identifica CADA prueba mencionada en el documento.
+- Para cada prueba, determina si es ACTUALIZACIÓN, ELIMINACIÓN o SIN_CAMBIO.
+- Extrae los valores CONCRETOS de criterios, no descripciones genéricas.
+- Si el documento dice "se actualiza según USP", busca el valor específico.
+
+**`pruebas_nuevas`**:
+- Solo para pruebas que se ADICIONAN (no existían antes).
+- Incluye criterio, metodología y referencia.
+
+**`prerrequisitos`**:
+- Actividades requeridas antes de implementar (ej: "Verificación analítica", "Validación de método").
+
+**`notas_operativas`**:
+- Información relevante como cambios en lead time, impacto en proveedores, etc.
+
+## EJEMPLOS DE TRANSFORMACIÓN
+
+**Texto de entrada:**
+"D. Se elimina de la especificación técnica y el método analítico la prueba de IDENTIFICACION (UV): B."
+
+**Output correcto:**
+```json
+{{
+  "prueba": "Identificación (UV)",
+  "tipo_cambio": "ELIMINACIÓN",
+  "criterio_actual": "Las absorbividades a 272 nm no difieren en más del 3%",
+  "criterio_propuesto": null,
+  "metodologia_actual": "Espectrofotometría UV",
+  "metodologia_propuesta": null,
+  "referencia": "USP"
+}}
+```
+
+**Texto de entrada:**
+"A. Se actualiza la redacción del criterio de aceptación de la prueba de Descripción de acuerdo con lo establecido en la USP vigente. Criterio actual: Polvo de color blanco o crema. Criterio propuesto: Polvo cristalino de color blanco a cremoso."
+
+**Output correcto:**
+```json
+{{
+  "prueba": "Descripción",
+  "tipo_cambio": "ACTUALIZACIÓN",
+  "criterio_actual": "Polvo de color blanco o crema",
+  "criterio_propuesto": "Polvo cristalino de color blanco a cremoso",
+  "metodologia_actual": null,
+  "metodologia_propuesta": null,
+  "referencia": "USP"
+}}
+```
+
+**Output INCORRECTO (muy genérico):**
+```json
+"A. Se actualiza la redacción del criterio de aceptación de la prueba de Descripción de acuerdo con lo establecido en la USP vigente."
+```
+
+## Texto de Entrada (Control de Cambio)
+
+<descripcion_detallada_cambio>
+{metadata_content}
+</descripcion_detallada_cambio>
+
+Genera el JSON estructurado basado *únicamente* en el texto de entrada. Asegúrate de extraer VALORES CONCRETOS, no descripciones genéricas.
 """
 
 STRUCTURED_EXTRACTION_SIDE_BY_SIDE = """

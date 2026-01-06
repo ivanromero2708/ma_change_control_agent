@@ -1,3 +1,26 @@
+"""
+Herramienta refactorizada para aplicar parches de método analítico.
+
+Este módulo simplifica la carga y búsqueda de pruebas en métodos
+analíticos (tanto legados como propuestos) a través de un índice
+consistente. La idea principal es:
+
+* Usar una única función ``load_tests`` para obtener una lista de
+  pruebas a partir de un payload JSON que puede ser una lista de
+  wrappers, una lista directa de pruebas o un dict con clave
+  ``pruebas``/``tests``. Siempre que exista un ``source_id`` en el
+  wrapper se preserva como ``_source_id`` en cada prueba.
+
+* Construir un índice con ``build_test_index`` que permita localizar
+  pruebas por tres claves: ``_source_id`` (id numérico del wrapper),
+  ``section_id`` y un nombre normalizado (sin tildes ni mayúsculas).
+
+* Utilizar una función ``find_test`` que consulte ese índice para
+  devolver tanto el índice dentro de la lista como el objeto de
+  prueba correspondiente. Primero se intenta por id numérico,
+  luego por sección y finalmente por nombre.
+"""
+
 from __future__ import annotations
 
 import warnings
@@ -12,9 +35,11 @@ warnings.filterwarnings(
 
 import json
 import logging
+import re
+import unicodedata
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Annotated, Any, Optional, List, Iterable
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, ToolMessage, SystemMessage
@@ -22,6 +47,7 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from pydantic import BaseModel, Field, ValidationError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.graph.state import DeepAgentState
 from src.prompts.tool_description_prompts import APPLY_METHOD_PATCH_TOOL_DESCRIPTION
@@ -30,15 +56,16 @@ from src.tools.analyze_change_impact import (
     UnifiedInterventionAction,
     ElementoMetodoPropuesto,
 )
-from src.models.analytical_method_models import (
-    Prueba as MetodoPrueba,
-    MetodoAnaliticoNuevo,
-    Especificacion,
-    CondicionCromatografica,
-    Solucion,
+from src.models.structured_test_model import (
+    TestSolution,
+    MetodoAnaliticoFinal,
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constantes y configuración
+# ---------------------------------------------------------------------------
 
 PLAN_DEFAULT_PATH = "/new/change_implementation_plan.json"
 METHOD_DEFAULT_PATH = "/new/new_method_final.json"
@@ -46,12 +73,19 @@ PATCH_LOG_PATH = "/logs/change_patch_log.jsonl"
 PATCHES_DIR = "/new/applied_changes"
 LEGACY_METHOD_DEFAULT_PATH = "/actual_method/test_solution_structured_content.json"
 PROPOSED_METHOD_DEFAULT_PATH = "/proposed_method/test_solution_structured_content.json"
-method_patch_model = init_chat_model(model="openai:gpt-5-mini", temperature=0)
+
+method_patch_model = init_chat_model(model="openai:gpt-5-mini")
+MAX_LLM_RETRIES = 3
+
+
+class EmptyLLMResponseError(Exception):
+    """Excepción lanzada cuando el LLM retorna una respuesta vacía."""
+    pass
 
 
 class GeneratedMethodPatch(BaseModel):
     """Respuesta estructurada del LLM para generar/editar una prueba."""
-    prueba_resultante: MetodoPrueba
+    prueba_resultante: TestSolution
     comentarios: Optional[str] = Field(
         default=None,
         description="Notas breves sobre como se construyo la prueba final o recordatorios para el equipo",
@@ -61,21 +95,44 @@ class GeneratedMethodPatch(BaseModel):
 APPLY_METHOD_PATCH_SYSTEM = """Eres un quimico especialista en metodos analiticos farmaceuticos.
 Debes generar el objeto `prueba_resultante` listo para insertarse en el metodo destino.
 
+El objeto prueba_resultante debe seguir la estructura TestSolution con los siguientes campos:
+- section_id (str): Numero de seccion (ej: "7.1", "7.2")
+- section_title (str): Titulo completo de la seccion
+- test_name (str): Nombre descriptivo del test
+- test_type (str): Tipo de prueba ("Descripcion", "Identificacion", "Valoracion", "Impurezas", "Peso promedio", "Disolucion", "Uniformidad de contenido", "Uniformidad de unidades de dosificacion", "Control microbiologico", "Humedad", "Dureza", "Espesores", "Perdida por Secado", "Otros analisis")
+- condiciones_cromatograficas (opcional): Condiciones HPLC/GC si aplica
+- soluciones (opcional): Lista de soluciones con nombre_solucion y preparacion_solucion
+- procedimiento (opcional): Objeto con texto del procedimiento, sst si aplica, tiempo_retencion, notas
+- calculos (opcional): Formulas y variables de calculo
+- criterio_aceptacion (opcional): Objeto con texto, tipo_criterio, tabla_criterios, notas
+- equipos (opcional): Lista de equipos
+- reactivos (opcional): Lista de reactivos
+- referencias (opcional): Lista de referencias
+
 Acciones:
-- editar: parte de la prueba objetivo actual y ajustala segun la descripcion del cambio, aprovechando la evidencia del metodo legado y el metodo propuesto. Respeta o reutiliza el id proporcionado.
-- adicionar: crea una prueba nueva usando el id_sugerido si existe; si falta, genera uno de 8 caracteres hexadecimales. Usa la mejor evidencia disponible del metodo propuesto.
-- eliminar: conserva la trazabilidad. Devuelve la prueba con el mismo id y una nota clara de eliminacion en `procedimientos` y `especificaciones`.
+- editar: parte de la prueba objetivo actual y ajustala segun la descripcion del cambio, aprovechando la evidencia del metodo legado y el metodo propuesto. Respeta el section_id proporcionado.
+- adicionar: crea una prueba nueva con un section_id apropiado. Usa la mejor evidencia disponible del metodo propuesto.
+- eliminar: conserva la trazabilidad. Devuelve la prueba con el mismo section_id y una nota clara de eliminacion en procedimiento.texto y criterio_aceptacion.texto.
 - dejar igual: replica la prueba objetivo sin cambios.
 
 Reglas:
 - Siempre devuelve un JSON valido con `prueba_resultante` y `comentarios` (o null).
-- Llena siempre `procedimientos` y al menos una entrada en `especificaciones`. Nunca dejes campos obligatorios vacios.
+- Los campos obligatorios son: section_id, section_title, test_name, test_type.
 - Usa texto tecnico en espanol; respeta unidades y datos numericos de las fuentes.
 - Si faltan datos en todas las fuentes, devuelve el esqueleto minimo con placeholders claros en espanol.
+- COPIA VERBATIM el texto de procedimientos y criterios de aceptacion cuando sea posible.
 
 Formato de salida esperado:
 {
-  "prueba_resultante": {... objeto completo de la prueba ...},
+  "prueba_resultante": {
+    "section_id": "7.X",
+    "section_title": "TITULO DE LA PRUEBA",
+    "test_name": "Nombre descriptivo",
+    "test_type": "Valoracion",
+    "procedimiento": {"texto": "...", "sst": null, "tiempo_retencion": null, "notas": null},
+    "criterio_aceptacion": {"texto": "...", "tipo_criterio": null, "tabla_criterios": null, "notas": null},
+    ...
+  },
   "comentarios": "Notas breves (o null)"
 }
 """
@@ -106,7 +163,149 @@ ID sugerido: {id_sugerido}
 """
 
 
-def _load_json_payload(files: dict[str, Any], path: str) -> Optional[dict[str, Any] | list]:
+# ---------------------------------------------------------------------------
+# Utilidades de normalización y carga de pruebas (REFACTORIZADO)
+# ---------------------------------------------------------------------------
+
+def _normalize_name(value: Optional[str]) -> Optional[str]:
+    """Convierte un nombre a minúsculas, sin tildes ni espacios redundantes."""
+    if not value:
+        return None
+    # Eliminar acentos
+    normalized = unicodedata.normalize('NFD', value)
+    normalized = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+    # Minúsculas y colapsar espacios
+    return " ".join(normalized.strip().lower().split())
+
+
+def _strip_section_prefix(name: Optional[str]) -> Optional[str]:
+    """Elimina números de sección al inicio (ej. '7.3 Título' -> 'Título')."""
+    if not name:
+        return None
+    return re.sub(r'^\d+(\.\d+)*\s*', '', name).strip()
+
+
+def load_tests(payload: Any) -> List[Dict[str, Any]]:
+    """
+    Extrae una lista de pruebas de un payload que puede ser:
+    - Una lista de wrappers {"tests": [...], "source_id": N}
+    - Una lista directa de pruebas
+    - Un dict con clave "pruebas" o "tests"
+
+    Siempre que exista "source_id" en el wrapper, se copia a
+    ``_source_id`` de cada prueba para conservar la trazabilidad.
+    """
+    tests: List[Dict[str, Any]] = []
+    if payload is None:
+        return tests
+    
+    # Si es lista
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict) and "tests" in item and isinstance(item["tests"], list):
+                # Es un wrapper con tests anidados
+                sid = item.get("source_id")
+                for test in item["tests"]:
+                    if isinstance(test, dict):
+                        t = test.copy()
+                        if sid is not None:
+                            t["_source_id"] = sid
+                        tests.append(t)
+            elif isinstance(item, dict):
+                # Es una prueba directa
+                tests.append(item.copy())
+        return tests
+    
+    # Si es dict
+    if isinstance(payload, dict):
+        inner = payload.get("pruebas") or payload.get("tests")
+        if isinstance(inner, list):
+            return load_tests(inner)  # Recursivo para aplanar
+        # Si es un dict de un método ya procesado
+        if "pruebas" in payload and isinstance(payload["pruebas"], list):
+            return [p.copy() for p in payload["pruebas"]]
+    
+    return tests
+
+
+def build_test_index(tests: List[Dict[str, Any]]) -> Dict[str, Dict[str, Tuple[int, Dict[str, Any]]]]:
+    """
+    Construye un índice para localizar pruebas de forma eficiente. Devuelve
+    un diccionario con tres subíndices:
+
+    * ``by_wrapper``: clave = ``_source_id`` (string), valor = (idx, prueba)
+    * ``by_section``: clave = ``section_id`` (string), valor = (idx, prueba)
+    * ``by_name``: clave = nombre normalizado y sin prefijo de sección,
+      valor = (idx, prueba)
+    """
+    by_wrapper: Dict[str, Tuple[int, Dict[str, Any]]] = {}
+    by_section: Dict[str, Tuple[int, Dict[str, Any]]] = {}
+    by_name: Dict[str, Tuple[int, Dict[str, Any]]] = {}
+    
+    for idx, test in enumerate(tests):
+        # Clave por wrapper id (_source_id tiene prioridad)
+        wid = test.get("_source_id") or test.get("source_id")
+        if wid is not None:
+            by_wrapper[str(wid)] = (idx, test)
+        
+        # Clave por sección
+        sid = test.get("section_id")
+        if sid is not None:
+            by_section[str(sid)] = (idx, test)
+        
+        # Clave por nombre normalizado
+        name = test.get("test_name") or test.get("section_title") or test.get("prueba")
+        if name:
+            key = _normalize_name(_strip_section_prefix(name))
+            if key:
+                by_name[key] = (idx, test)
+    
+    return {"by_wrapper": by_wrapper, "by_section": by_section, "by_name": by_name}
+
+
+def find_test(
+    index: Dict[str, Dict[str, Tuple[int, Dict[str, Any]]]],
+    wrapper_id: Optional[int] = None,
+    section_id: Optional[str] = None,
+    name: Optional[str] = None
+) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
+    """
+    Busca una prueba usando un índice. El orden de prioridad es:
+
+    1. ``wrapper_id`` (``_source_id``) si se proporciona.
+    2. ``section_id`` si es una cadena no vacía.
+    3. ``name`` normalizado (sin prefijos de sección) y coincidencias parciales.
+
+    Retorna una tupla (posición en la lista, prueba) o (None, None) si no se encuentra.
+    """
+    # 1. Buscar por wrapper id (_source_id)
+    if wrapper_id is not None:
+        entry = index["by_wrapper"].get(str(wrapper_id))
+        if entry:
+            return entry
+    
+    # 2. Buscar por section id
+    if section_id:
+        entry = index["by_section"].get(str(section_id))
+        if entry:
+            return entry
+    
+    # 3. Buscar por nombre normalizado exacto
+    if name:
+        key = _normalize_name(_strip_section_prefix(name))
+        if key:
+            entry = index["by_name"].get(key)
+            if entry:
+                return entry
+            # Si no hay coincidencia exacta, buscar parcial
+            for k, e in index["by_name"].items():
+                if key in k or k in key:
+                    return e
+    
+    return None, None
+
+
+def _load_json_payload(files: Dict[str, Any], path: str) -> Optional[Dict[str, Any] | List]:
     """
     Carga un payload JSON desde el filesystem virtual.
     
@@ -140,266 +339,6 @@ def _load_json_payload(files: dict[str, Any], path: str) -> Optional[dict[str, A
         return entry
 
     return None
-
-
-def _normalize_text(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return None
-    return " ".join(value.strip().lower().split())
-
-
-def _transform_legacy_tests(legacy_tests: list) -> list[dict[str, Any]]:
-    """
-    Transforma pruebas del formato legado (TestSolution de structured_test_model.py) 
-    al nuevo formato requerido por MetodoAnaliticoNuevo (Prueba de analytical_method_models.py).
-    
-    Formato legado (TestSolution):
-    - section_id, section_title, test_name, test_type
-    - condiciones_cromatograficas: CondicionCromatografica con nombre_condicion/valor_condicion
-    - soluciones: List[Solucion] con nombre_solucion/preparacion_solucion/notas
-    - procedimiento: Procedimiento con texto/notas/tiempo_retencion
-    - criterio_aceptacion: CriterioAceptacion con texto/notas/tabla_criterios
-    - equipos: List[str]
-    - reactivos: List[str]
-    - procedimiento_sst: List[OrdenInyeccion]
-    
-    Formato nuevo (Prueba):
-    - id_prueba, prueba, procedimientos
-    - condiciones_cromatograficas: List[CondicionCromatografica] con nombre/descripcion
-    - soluciones: List[Solucion] con nombre_solucion/preparacion_solucion
-    - equipos: List[str]
-    - reactivos: List[str]
-    - especificaciones: List[Especificacion] con prueba/texto_especificacion/subespecificacion
-    
-    El formato legado puede venir envuelto en: [{tests: [...], source_id: N}, ...]
-    """
-    # Primero, aplanar si hay wrappers con "tests" anidados
-    flattened_tests = []
-    for item in legacy_tests:
-        if not isinstance(item, dict):
-            continue
-        # Si el item tiene "tests" anidado (wrapper de TestSolutions), extraer esas pruebas
-        if "tests" in item and isinstance(item["tests"], list):
-            flattened_tests.extend(item["tests"])
-        else:
-            flattened_tests.append(item)
-    
-    transformed = []
-    
-    for test in flattened_tests:
-        if not isinstance(test, dict):
-            continue
-        
-        # Nombre de la prueba (prioridad: test_name > section_title > prueba)
-        prueba_nombre = test.get("test_name") or test.get("section_title") or test.get("prueba") or "Sin nombre"
-        
-        # Mapear campos del formato TestSolution al formato Prueba
-        new_test: dict[str, Any] = {
-            "id_prueba": test.get("section_id") or test.get("id_prueba"),
-            "prueba": prueba_nombre,
-            "procedimientos": "",
-            "equipos": [],
-            "condiciones_cromatograficas": [],
-            "reactivos": [],
-            "soluciones": [],
-            "especificaciones": [],
-        }
-        
-        # --- Extraer procedimiento ---
-        # TestSolution.procedimiento es un objeto Procedimiento con {texto, notas, tiempo_retencion}
-        proc = test.get("procedimiento")
-        if isinstance(proc, dict):
-            new_test["procedimientos"] = proc.get("texto") or ""
-        elif isinstance(proc, str):
-            new_test["procedimientos"] = proc
-        
-        # --- Extraer equipos (ya es List[str] en TestSolution) ---
-        equipos = test.get("equipos")
-        if isinstance(equipos, list):
-            for eq in equipos:
-                if isinstance(eq, str):
-                    new_test["equipos"].append(eq)
-                elif isinstance(eq, dict):
-                    # Por si acaso viene como dict con "nombre"
-                    new_test["equipos"].append(eq.get("nombre") or str(eq))
-        
-        # --- Extraer reactivos (ya es List[str] en TestSolution) ---
-        reactivos = test.get("reactivos")
-        if isinstance(reactivos, list):
-            for r in reactivos:
-                if isinstance(r, str):
-                    new_test["reactivos"].append(r)
-        
-        # --- Extraer condiciones cromatográficas ---
-        # TestSolution.condiciones_cromatograficas es CondicionCromatografica con nombre_condicion/valor_condicion
-        # Prueba.condiciones_cromatograficas es List[CondicionCromatografica] con nombre/descripcion
-        cond_crom = test.get("condiciones_cromatograficas")
-        if isinstance(cond_crom, dict):
-            # Mapear nombre_condicion -> nombre, valor_condicion -> descripcion
-            new_test["condiciones_cromatograficas"].append({
-                "nombre": cond_crom.get("nombre_condicion") or cond_crom.get("nombre") or "Condición",
-                "descripcion": cond_crom.get("valor_condicion") or cond_crom.get("descripcion") or str(cond_crom),
-            })
-        elif isinstance(cond_crom, list):
-            for cond in cond_crom:
-                if isinstance(cond, dict):
-                    new_test["condiciones_cromatograficas"].append({
-                        "nombre": cond.get("nombre_condicion") or cond.get("nombre") or "Condición",
-                        "descripcion": cond.get("valor_condicion") or cond.get("descripcion") or str(cond),
-                    })
-        
-        # --- Extraer soluciones ---
-        # TestSolution.soluciones es List[Solucion] con nombre_solucion/preparacion_solucion/notas
-        # Prueba.soluciones es List[Solucion] con nombre_solucion/preparacion_solucion (sin notas)
-        soluciones = test.get("soluciones")
-        if isinstance(soluciones, list):
-            for sol in soluciones:
-                if isinstance(sol, dict):
-                    new_test["soluciones"].append({
-                        "nombre_solucion": sol.get("nombre_solucion") or sol.get("nombre") or "Solución",
-                        "preparacion_solucion": sol.get("preparacion_solucion") or sol.get("preparacion") or "",
-                    })
-        
-        # --- Extraer especificaciones desde criterio_aceptacion ---
-        # TestSolution.criterio_aceptacion es CriterioAceptacion con texto/notas/tabla_criterios
-        # Prueba.especificaciones es List[Especificacion] con prueba/texto_especificacion/subespecificacion
-        criterio = test.get("criterio_aceptacion")
-        especificaciones_existentes = test.get("especificaciones")
-        
-        if isinstance(especificaciones_existentes, list) and especificaciones_existentes:
-            # Si ya tiene especificaciones en formato nuevo, usarlas directamente
-            for esp in especificaciones_existentes:
-                if isinstance(esp, dict):
-                    new_test["especificaciones"].append({
-                        "prueba": esp.get("prueba") or prueba_nombre,
-                        "texto_especificacion": esp.get("texto_especificacion") or esp.get("criterio") or "",
-                        "subespecificacion": esp.get("subespecificacion"),
-                    })
-        elif isinstance(criterio, dict):
-            # Transformar CriterioAceptacion a Especificacion
-            texto_criterio = criterio.get("texto") or ""
-            
-            # Construir subespecificaciones desde tabla_criterios si existe
-            subespecificaciones = None
-            tabla_criterios = criterio.get("tabla_criterios")
-            if isinstance(tabla_criterios, list) and tabla_criterios:
-                subespecificaciones = []
-                for tc in tabla_criterios:
-                    if isinstance(tc, dict):
-                        subespecificaciones.append({
-                            "nombre_subespecificacion": tc.get("etapa") or tc.get("nombre_subespecificacion") or "",
-                            "criterio_aceptacion_subespecificacion": tc.get("criterio_aceptacion") or tc.get("criterio_aceptacion_subespecificacion") or "",
-                        })
-            
-            new_test["especificaciones"].append({
-                "prueba": prueba_nombre,
-                "texto_especificacion": texto_criterio,
-                "subespecificacion": subespecificaciones if subespecificaciones else None,
-            })
-        elif isinstance(criterio, str):
-            new_test["especificaciones"].append({
-                "prueba": prueba_nombre,
-                "texto_especificacion": criterio,
-                "subespecificacion": None,
-            })
-        else:
-            # Crear especificación por defecto
-            new_test["especificaciones"].append({
-                "prueba": prueba_nombre,
-                "texto_especificacion": "Ver procedimiento",
-                "subespecificacion": None,
-            })
-        
-        transformed.append(new_test)
-    
-    logger.debug(f"Transformadas {len(transformed)} pruebas del formato TestSolution al formato Prueba.")
-    return transformed
-
-
-def _to_jsonable(prueba: Any) -> Optional[dict[str, Any]]:
-    if prueba is None:
-        return None
-    if isinstance(prueba, dict):
-        return deepcopy(prueba)
-    if hasattr(prueba, "model_dump"):
-        return prueba.model_dump(mode="json")
-    return json.loads(json.dumps(prueba, ensure_ascii=False))
-
-
-def _extract_pruebas_list(payload: Any) -> list:
-    """
-    Extrae la lista de pruebas de un payload que puede ser:
-    - Una lista de wrappers con estructura [{"tests": [...], "source_id": N}, ...] (formato legado)
-    - Una lista directa de pruebas
-    - Un dict con clave "pruebas" o "tests"
-    - None
-    
-    Returns:
-        Lista de pruebas aplanada (puede estar vacía)
-    """
-    if payload is None:
-        return []
-    
-    if isinstance(payload, list):
-        # Verificar si es una lista de wrappers con "tests" anidados
-        # Formato: [{"tests": [...], "source_id": N}, ...]
-        flattened = []
-        for item in payload:
-            if isinstance(item, dict) and "tests" in item and isinstance(item["tests"], list):
-                # Es un wrapper, extraer las pruebas
-                flattened.extend(item["tests"])
-            elif isinstance(item, dict):
-                # Es una prueba directa
-                flattened.append(item)
-        
-        # Si se aplanaron pruebas, retornar la lista aplanada
-        if flattened:
-            return flattened
-        # Si no hay nada, retornar la lista original
-        return payload
-    
-    if isinstance(payload, dict):
-        # Intentar extraer de "pruebas" o "tests"
-        if "pruebas" in payload:
-            pruebas = payload["pruebas"]
-            if isinstance(pruebas, list):
-                return _extract_pruebas_list(pruebas)  # Recursivo para manejar wrappers
-            return []
-        if "tests" in payload:
-            tests = payload["tests"]
-            if isinstance(tests, list):
-                return tests
-            return []
-    
-    return []
-
-
-def _find_prueba_entry(
-    pruebas: list[Any] | None, target_id: Optional[str], target_name: Optional[str]
-) -> tuple[Optional[int], Optional[dict[str, Any]]]:
-    if not pruebas:
-        return None, None
-
-    normalized_target = _normalize_text(target_name)
-
-    if target_id:
-        for idx, raw in enumerate(pruebas):
-            data = _to_jsonable(raw)
-            if isinstance(data, dict) and isinstance(data.get("id_prueba"), str) and data["id_prueba"] == target_id:
-                return idx, data
-
-    if normalized_target:
-        for idx, raw in enumerate(pruebas):
-            data = _to_jsonable(raw)
-            if isinstance(data, dict) and _normalize_text(data.get("prueba")) == normalized_target:
-                return idx, data
-
-    return None, None
-
-
-def _find_prueba_data(pruebas: list[Any] | None, target_id: Optional[str], target_name: Optional[str]) -> Optional[dict[str, Any]]:
-    _, data = _find_prueba_entry(pruebas, target_id, target_name)
-    return data
 
 
 
@@ -436,6 +375,38 @@ def _pretty_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2) if data is not None else "null"
 
 
+@retry(
+    stop=stop_after_attempt(MAX_LLM_RETRIES),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((EmptyLLMResponseError, ValidationError)),
+    reraise=True,
+)
+def _invoke_patch_llm(
+    llm_structured,
+    system_prompt: str,
+    human_prompt: str,
+) -> GeneratedMethodPatch:
+    """
+    Invoca el LLM para generar el patch con retry automático.
+    Lanza EmptyLLMResponseError si la respuesta está vacía.
+    """
+    logger.debug("Invocando LLM para generar patch de prueba...")
+    response = llm_structured.invoke(
+        [SystemMessage(content=system_prompt), HumanMessage(content=human_prompt)]
+    )
+    
+    if response is None:
+        logger.warning("LLM retornó respuesta None, reintentando...")
+        raise EmptyLLMResponseError("El LLM retornó una respuesta vacía (None)")
+    
+    if not hasattr(response, 'prueba_resultante') or response.prueba_resultante is None:
+        logger.warning("LLM retornó respuesta sin prueba_resultante, reintentando...")
+        raise EmptyLLMResponseError("El LLM retornó una respuesta sin prueba_resultante")
+    
+    logger.debug("LLM respondió exitosamente con prueba_resultante")
+    return response
+
+
 def _save_patch(
     files: dict[str, Any],
     action_index: int,
@@ -465,240 +436,235 @@ def apply_method_patch(
     tool_call_id: Annotated[str, InjectedToolCallId],
     plan_path: str = PLAN_DEFAULT_PATH,
     action_index: int = 0,
-    proposed_method_path: str = PROPOSED_METHOD_DEFAULT_PATH,
-    legacy_method_path: str = LEGACY_METHOD_DEFAULT_PATH,
     new_method_path: str = METHOD_DEFAULT_PATH,
 ) -> Command:
+    """
+    Aplica una acción del plan de intervención al método. Utiliza índices
+    para localizar la prueba objetivo en el método destino y conservar
+    la trazabilidad mediante ``_source_id``. Si el método de destino
+    no existe, se construye a partir del método legado. Para pruebas
+    nuevas se utilizan los datos del método propuesto.
+    """
     logger.info("Iniciando 'apply_method_patch' para la accion %s", action_index)
     files = state.get("files", {}) or {}
 
+    # -------------------------------------------------------------------------
+    # 1. Cargar el plan de intervención
+    # -------------------------------------------------------------------------
     plan_payload = _load_json_payload(files, plan_path)
     if plan_payload is None:
-        msg = f"No se encontro el plan de implementacion en {plan_path}."
+        msg = f"No se encontró el plan de implementación en {plan_path}."
         logger.error(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    # Validar y cargar el plan unificado
     try:
-        unified_plan = UnifiedInterventionPlan.model_validate(plan_payload)
+        plan = UnifiedInterventionPlan.model_validate(plan_payload)
     except ValidationError as exc:
-        msg = f"El plan de intervencion tiene formato invalido: {exc}"
+        msg = f"Formato de plan inválido: {exc}"
         logger.exception(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    if action_index < 0 or action_index >= len(unified_plan.plan_intervencion):
-        msg = f"El indice {action_index} esta fuera del rango del plan ({len(unified_plan.plan_intervencion)} acciones)."
+    if action_index < 0 or action_index >= len(plan.plan_intervencion):
+        msg = f"El índice {action_index} está fuera de rango (0–{len(plan.plan_intervencion) - 1})."
         logger.error(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    action: UnifiedInterventionAction = unified_plan.plan_intervencion[action_index]
-    accion_normalizada = action.accion
-    descripcion_cambio = action.cambio or ""
-    target_id = action.source_id_ma_legado
-    target_name = action.prueba_ma_legado
-    
-    # Extraer referencia del método propuesto
-    name_propuesto = None
-    idx_propuesto = None
-    source_id_propuesto = None
-    if action.elemento_metodo_propuesto:
-        name_propuesto = action.elemento_metodo_propuesto.prueba
-        idx_propuesto = action.elemento_metodo_propuesto.indice
-        source_id_propuesto = action.elemento_metodo_propuesto.source_id
+    action: UnifiedInterventionAction = plan.plan_intervencion[action_index]
+    accion = (action.accion or "").lower().strip()
+    descripcion = action.cambio or ""
+    legacy_id = action.source_id_ma_legado
+    legacy_name = action.prueba_ma_legado
 
-    # Cargar método base: primero intentar el nuevo, si no existe usar el legado
-    method_payload = _load_json_payload(files, new_method_path)
-    using_legacy_as_base = False
-    
-    if method_payload is None:
-        logger.info(f"No existe {new_method_path}, usando método legado como base.")
-        legacy_raw = _load_json_payload(files, legacy_method_path)
-        using_legacy_as_base = True
-        
-        if legacy_raw is None:
-            msg = f"No se encontró ni el método nuevo ({new_method_path}) ni el legado ({legacy_method_path})."
+    # -------------------------------------------------------------------------
+    # 2. Cargar método base (nuevo o legado)
+    # -------------------------------------------------------------------------
+    method_entry = _load_json_payload(files, new_method_path)
+    if method_entry and isinstance(method_entry, (dict, list)):
+        method_payload = method_entry
+    else:
+        # Fallback al método legado
+        legacy_entry = _load_json_payload(files, LEGACY_METHOD_DEFAULT_PATH)
+        if legacy_entry is None:
+            msg = f"No se encontró ningún método en {new_method_path} ni en {LEGACY_METHOD_DEFAULT_PATH}."
             logger.error(msg)
             return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
-        
-        # El archivo legado puede ser una lista directa de pruebas o un dict con "tests"
-        if isinstance(legacy_raw, list):
-            # Transformar pruebas del formato legado al nuevo formato
-            pruebas_transformadas = _transform_legacy_tests(legacy_raw)
-            method_payload = {"pruebas": pruebas_transformadas}
-            logger.debug(f"Método legado transformado: {len(pruebas_transformadas)} pruebas.")
-        else:
-            method_payload = legacy_raw
+        # Aplanar el método legado a un dict {"pruebas": [...]}
+        method_payload = {"pruebas": load_tests(legacy_entry)}
+        logger.info(f"Usando método legado como base: {len(method_payload['pruebas'])} pruebas.")
 
-    # Normalizar estructura: el método legado puede tener "tests" en lugar de "pruebas"
-    if isinstance(method_payload, dict):
-        if "tests" in method_payload and "pruebas" not in method_payload:
-            # Transformar pruebas del formato legado al nuevo formato
-            pruebas_transformadas = _transform_legacy_tests(method_payload.pop("tests"))
-            method_payload["pruebas"] = pruebas_transformadas
-            logger.debug(f"Renombrado y transformado 'tests' a 'pruebas': {len(pruebas_transformadas)} pruebas.")
+    # -------------------------------------------------------------------------
+    # 3. Construir índice del método
+    # -------------------------------------------------------------------------
+    method_tests = load_tests(method_payload)
+    method_index = build_test_index(method_tests)
 
-    try:
-        method_model = MetodoAnaliticoNuevo(**method_payload)
-    except ValidationError as exc:
-        msg = f"El metodo actual no cumple el esquema esperado: {exc}"
-        logger.exception(msg)
-        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
-
-    method_json = method_model.model_dump(mode="json")
-    pruebas_metodo = method_json.get("pruebas", [])
-
-    target_index, target_prueba = _find_prueba_entry(pruebas_metodo, target_id, target_name)
-    if accion_normalizada in {"editar", "eliminar"} and target_prueba is None:
-        msg = (
-            f"No se pudo localizar la prueba objetivo (id: {target_id}, nombre: {target_name}) "
-            f"en el metodo destino para la accion {accion_normalizada}."
-        )
-        logger.error(msg)
-        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
-
-    # Cargar payloads de fuentes
-    proposed_payload = _load_json_payload(files, proposed_method_path)
-    legacy_payload = _load_json_payload(files, legacy_method_path)
-
-    # Extraer lista de pruebas del legado (puede ser lista directa o dict con "pruebas"/"tests")
-    legacy_pruebas_list = _extract_pruebas_list(legacy_payload)
-    legacy_prueba = _find_prueba_data(legacy_pruebas_list, target_id, target_name)
-    
-    # Buscar en método propuesto usando índice o nombre
-    prueba_propuesta = None
-    if proposed_payload:
-        proposed_pruebas_list = _extract_pruebas_list(proposed_payload)
-        if idx_propuesto is not None and 0 <= idx_propuesto < len(proposed_pruebas_list):
-            prueba_propuesta = proposed_pruebas_list[idx_propuesto]
-        elif name_propuesto:
-            prueba_propuesta = _find_prueba_data(proposed_pruebas_list, None, name_propuesto)
-
-    method_summary = _build_method_summary(method_json)
-    suggested_id = target_id
-
-    if accion_normalizada == "dejar igual":
-        summary_message = f"Accion #{action_index}: se mantiene sin cambios la prueba objetivo (id: {target_id})."
-        logger.info(summary_message)
-        return Command(update={"messages": [ToolMessage(content=summary_message, tool_call_id=tool_call_id)]})
-
-    if accion_normalizada == "eliminar":
-        updated_method = deepcopy(method_json)
-        if target_index is not None:
-            removed = updated_method["pruebas"].pop(target_index)
-        else:
-            removed = None
-
-        try:
-            validated_method = MetodoAnaliticoNuevo(**updated_method)
-        except ValidationError as exc:
-            msg = f"La version resultante del metodo no paso la validacion despues de eliminar: {exc}"
-            logger.exception(msg)
+    # -------------------------------------------------------------------------
+    # 4. Localizar la prueba objetivo (para editar/eliminar)
+    # -------------------------------------------------------------------------
+    target_idx: Optional[int] = None
+    target_prueba: Optional[Dict[str, Any]] = None
+    if accion in {"editar", "eliminar"}:
+        target_idx, target_prueba = find_test(method_index, legacy_id, None, legacy_name)
+        if target_prueba is None:
+            msg = f"No se encontró la prueba objetivo (id={legacy_id}, nombre={legacy_name}) en el método."
+            logger.error(msg)
             return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-        method_dump = validated_method.model_dump(mode="json")
-        method_str = json.dumps(method_dump, ensure_ascii=False, indent=2)
+    # -------------------------------------------------------------------------
+    # 5. Cargar métodos de referencia para el LLM
+    # -------------------------------------------------------------------------
+    # Cargar pruebas del método propuesto
+    proposed_tests: List[Dict[str, Any]] = []
+    proposed_entry = _load_json_payload(files, PROPOSED_METHOD_DEFAULT_PATH)
+    if proposed_entry is not None:
+        proposed_tests = load_tests(proposed_entry)
+    proposed_index = build_test_index(proposed_tests) if proposed_tests else {"by_wrapper": {}, "by_section": {}, "by_name": {}}
 
-        summary_message = f"Prueba eliminada del metodo (accion #{action_index}, id: {target_id}, nombre: {target_name})."
+    # Cargar pruebas del método legado (para referencia del LLM)
+    legacy_tests: List[Dict[str, Any]] = []
+    legacy_entry = _load_json_payload(files, LEGACY_METHOD_DEFAULT_PATH)
+    if legacy_entry is not None:
+        legacy_tests = load_tests(legacy_entry)
+    legacy_index = build_test_index(legacy_tests) if legacy_tests else {"by_wrapper": {}, "by_section": {}, "by_name": {}}
 
+    # Buscar prueba legacy original para el LLM
+    legacy_prueba: Optional[Dict[str, Any]] = None
+    if legacy_id is not None or legacy_name:
+        _, legacy_prueba = find_test(legacy_index, legacy_id, None, legacy_name)
+
+    # Seleccionar prueba de referencia del método propuesto
+    prop_test: Optional[Dict[str, Any]] = None
+    source_id_propuesto: Optional[int] = None
+    if action.elemento_metodo_propuesto:
+        idx_prop = action.elemento_metodo_propuesto.indice
+        prop_id = action.elemento_metodo_propuesto.source_id
+        prop_name = action.elemento_metodo_propuesto.prueba
+        source_id_propuesto = prop_id
+        
+        if idx_prop is not None and 0 <= idx_prop < len(proposed_tests):
+            prop_test = proposed_tests[idx_prop]
+        elif prop_id is not None:
+            _, prop_test = find_test(proposed_index, prop_id, None, None)
+        elif prop_name:
+            _, prop_test = find_test(proposed_index, None, None, prop_name)
+
+    method_summary = _build_method_summary(method_payload if isinstance(method_payload, dict) else {})
+
+    # -------------------------------------------------------------------------
+    # 6. Procesar la acción
+    # -------------------------------------------------------------------------
+    
+    # Caso dejar igual: no se modifica nada
+    if accion == "dejar igual":
+        msg = f"Acción #{action_index}: se deja sin cambios la prueba con id={legacy_id}."
+        logger.info(msg)
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+
+    # Caso eliminar: quitar la prueba y actualizar
+    if accion == "eliminar":
+        updated_tests = method_tests.copy()
+        if target_idx is not None:
+            updated_tests.pop(target_idx)
+        
+        updated_payload = {"pruebas": updated_tests}
         files_update = dict(files)
-        _save_patch(files_update, action_index, accion_normalizada, None, target_id, target_name)
-        files_update[new_method_path] = {"content": method_str, "data": method_dump}
-        log_entry = {
+        files_update[new_method_path] = {
+            "content": json.dumps(updated_payload, ensure_ascii=False, indent=2),
+            "data": updated_payload,
+            "modified_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_patch(files_update, action_index, accion, None, legacy_id, legacy_name)
+        _append_log(files_update, {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "plan_path": plan_path,
             "method_path": new_method_path,
             "action_index": action_index,
-            "accion": accion_normalizada,
-            "target_id": target_id,
-        }
-        _append_log(files_update, log_entry)
+            "accion": accion,
+            "target_id": legacy_id,
+        })
+        summary = f"Prueba eliminada (id={legacy_id}, nombre={legacy_name})."
+        logger.info(summary)
+        return Command(update={"files": files_update, "messages": [ToolMessage(content=summary, tool_call_id=tool_call_id)]})
 
-        logger.info(summary_message)
-        return Command(
-            update={
-                "files": files_update,
-                "messages": [ToolMessage(content=summary_message, tool_call_id=tool_call_id)],
-            }
-        )
-
-    # Acciones editar / adicionar -> LLM
+    # Casos editar / adicionar -> invocar LLM
     human_prompt = APPLY_METHOD_PATCH_HUMAN_TEMPLATE.format(
-        descripcion_cambio=descripcion_cambio or "(sin descripcion)",
-        accion=accion_normalizada,
-        id_sugerido=suggested_id or "(sin id sugerido)",
+        descripcion_cambio=descripcion or "(sin descripción)",
+        accion=accion,
+        id_sugerido=legacy_id or "(sin id)",
         prueba_objetivo=_pretty_json(target_prueba),
         prueba_legacy=_pretty_json(legacy_prueba),
-        prueba_propuesta=_pretty_json(prueba_propuesta),
+        prueba_propuesta=_pretty_json(prop_test),
         metadatos_metodo=_pretty_json(method_summary),
     )
 
     llm_structured = method_patch_model.with_structured_output(GeneratedMethodPatch)
     try:
-        llm_response = llm_structured.invoke(
-            [
-                SystemMessage(content=APPLY_METHOD_PATCH_SYSTEM),
-                HumanMessage(content=human_prompt),
-            ]
-        )
+        llm_response = _invoke_patch_llm(llm_structured, APPLY_METHOD_PATCH_SYSTEM, human_prompt)
+    except EmptyLLMResponseError as exc:
+        msg = f"El LLM retornó respuesta vacía después de {MAX_LLM_RETRIES} intentos: {exc}"
+        logger.error(msg)
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
     except Exception as exc:  # noqa: BLE001
-        msg = f"El LLM no pudo generar la prueba actualizada: {exc}"
+        msg = f"Error invocando LLM: {exc}"
         logger.exception(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    prueba_payload = _to_jsonable(llm_response.prueba_resultante) or {}
-    if suggested_id and not prueba_payload.get("id_prueba"):
-        prueba_payload["id_prueba"] = suggested_id
+    prueba_json = llm_response.prueba_resultante.model_dump(mode="json")
+    comentario = llm_response.comentarios
 
+    # Conservar _source_id para mantener trazabilidad
+    if accion == "editar" and target_prueba:
+        original_id = target_prueba.get("_source_id") or target_prueba.get("source_id")
+        if original_id is not None:
+            prueba_json["_source_id"] = original_id
+            logger.debug(f"Preservado _source_id={original_id} en prueba editada")
+    elif accion == "adicionar" and source_id_propuesto is not None:
+        prueba_json["_source_id"] = source_id_propuesto
+        logger.debug(f"Asignado _source_id={source_id_propuesto} a prueba nueva")
+
+    # Si se sugirió un id de sección y no está presente, asignarlo
+    if legacy_id and not prueba_json.get("section_id"):
+        prueba_json["section_id"] = legacy_id
+
+    # Validar estructura de la prueba generada
     try:
-        prueba_actualizada = MetodoPrueba(**prueba_payload)
+        TestSolution(**prueba_json)
     except ValidationError as exc:
-        msg = f"El contenido generado por el LLM no cumple el esquema de una prueba: {exc}"
+        msg = f"El contenido generado por el LLM no cumple el esquema TestSolution: {exc}"
         logger.exception(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    prueba_json = prueba_actualizada.model_dump(mode="json")
-    updated_method = deepcopy(method_json)
-    if accion_normalizada == "editar" and target_index is not None:
-        updated_method["pruebas"][target_index] = prueba_json
-    elif accion_normalizada == "adicionar":
-        updated_method.setdefault("pruebas", []).append(prueba_json)
+    # Actualizar método
+    updated_tests = method_tests.copy()
+    if accion == "editar" and target_idx is not None:
+        updated_tests[target_idx] = prueba_json
+    elif accion == "adicionar":
+        updated_tests.append(prueba_json)
     else:
-        msg = f"La accion {accion_normalizada} no es soportada para generacion automatica."
+        msg = f"Acción no soportada: {accion}"
         logger.error(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    try:
-        validated_method = MetodoAnaliticoNuevo(**updated_method)
-    except ValidationError as exc:
-        msg = f"La version resultante del metodo no paso la validacion: {exc}"
-        logger.exception(msg)
-        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
-
-    method_dump = validated_method.model_dump(mode="json")
-    method_str = json.dumps(method_dump, ensure_ascii=False, indent=2)
-
-    summary_message = f"Prueba actualizada aplicada al metodo (accion #{action_index}, {accion_normalizada})."
-    if llm_response.comentarios:
-        summary_message += f" Notas del LLM: {llm_response.comentarios}"
-
+    updated_payload = {"pruebas": updated_tests}
     files_update = dict(files)
-    _save_patch(files_update, action_index, accion_normalizada, prueba_json, target_id, target_name)
-    files_update[new_method_path] = {"content": method_str, "data": method_dump}
-    log_entry = {
+    files_update[new_method_path] = {
+        "content": json.dumps(updated_payload, ensure_ascii=False, indent=2),
+        "data": updated_payload,
+        "modified_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_patch(files_update, action_index, accion, prueba_json, legacy_id, legacy_name)
+    _append_log(files_update, {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "plan_path": plan_path,
         "method_path": new_method_path,
         "action_index": action_index,
-        "accion": accion_normalizada,
-        "target_id": target_id,
-    }
-    _append_log(files_update, log_entry)
+        "accion": accion,
+        "target_id": legacy_id,
+    })
 
-    logger.info(summary_message)
-
-    return Command(
-        update={
-            "files": files_update,
-            "messages": [ToolMessage(content=summary_message, tool_call_id=tool_call_id)],
-        }
-    )
+    summary = f"Prueba {accion} aplicada (id={legacy_id})."
+    if comentario:
+        summary += f" Notas: {comentario}"
+    logger.info(summary)
+    
+    return Command(update={"files": files_update, "messages": [ToolMessage(content=summary, tool_call_id=tool_call_id)]})

@@ -191,19 +191,20 @@ CHANGE_CONTROL_ANALYSIS_TOOL_DESCRIPTION = """
   - Cuando el supervisor necesita consolidar los cambios propuestos y traducirlos en instrucciones de edición sobre `/new/new_method_final.json`.
   - Úsala una sola vez por ciclo de implementación, una vez que todos los insumos relevantes estén listos.
 
-  ## Insumos Requeridos
-  - **Método legado:** `/actual_method/test_solution_structured_content.json` - Pruebas estructuradas del método actual.
-  - **Control de cambios:** `/new/change_control_summary.json` - Lista de cambios a implementar.
-  - **Método propuesto:** `/proposed_method/test_solution_structured_content.json` - Pruebas estructuradas del método propuesto (de side-by-side o referencia).
+  ## Rutas de Archivos (FIJAS - NO CONFIGURABLES)
+  Esta herramienta usa rutas predeterminadas fijas:
+  - **Método legado:** `/actual_method/test_solution_structured_content.json`
+  - **Control de cambios:** `/new/change_control_summary.json`
+  - **Método propuesto:** `/proposed_method/test_solution_structured_content.json`
+  - **Salida:** `/new/change_implementation_plan.json`
 
   ## Buenas Prácticas
-  - **Precondición:** Asegúrate de que los tres archivos estén disponibles en el estado antes de llamar esta herramienta.
+  - **Precondición:** Asegúrate de que los tres archivos de entrada estén disponibles en el estado antes de llamar esta herramienta.
   - **Contexto resumido:** No es necesario leer manualmente los archivos grandes; la herramienta los valida y extrae solo los campos necesarios para el LLM.
+  - **Sin parámetros:** Llama al tool sin argumentos adicionales.
 
   ## Parámetros
-  - `proposed_method_path (str)`: Ruta al método propuesto estructurado. Default `/proposed_method/test_solution_structured_content.json`.
-  - `legacy_method_path (str)`: Ruta al método legado estructurado. Default `/actual_method/test_solution_structured_content.json`.
-  - `change_control_path (str)`: Ruta al resumen del control de cambios. Default `/new/change_control_summary.json`.
+  - No requiere parámetros. Las rutas de archivos son fijas.
 
   ## Salida y Efectos en el Estado
   - **Mensaje de Retorno (ToolMessage):** Resume la cantidad de acciones propuestas para implementar los cambios.
@@ -227,17 +228,19 @@ APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
   - Cuando necesites materializar **una** accion del plan (indice especifico) para actualizar `/new/new_method_final.json`.
   - Cada llamada procesa una accion: editar, adicionar, eliminar o dejar igual. Ejecuta tantas llamadas como acciones existan.
   
+  ## Rutas de Archivos (FIJAS - NO CONFIGURABLES)
+  Esta herramienta usa rutas predeterminadas fijas para los metodos de referencia:
+  - **Metodo legado:** `/actual_method/test_solution_structured_content.json`
+  - **Metodo propuesto:** `/proposed_method/test_solution_structured_content.json`
+  
   ## Buenas Practicas
   - Proporciona siempre el `action_index` correcto; revisa el plan antes de llamar a la herramienta.
-  - Asegurate de que los archivos de referencia (`legacy_method` y `proposed_method`) esten cargados en el estado para
-    que el LLM disponga de contexto completo.
+  - Asegurate de que los archivos de referencia esten cargados en el estado para que el LLM disponga de contexto completo.
   - La herramienta guarda el resultado en `/new/applied_changes/{action_index}.json` y actualiza `/new/new_method_final.json`.
   
   ## Parametros
   - `plan_path (str)`: Ruta al plan generado por `analyze_change_impact`. Default `/new/change_implementation_plan.json`.
   - `action_index (int)`: Indice (0-based) de la accion a ejecutar.
-  - `proposed_method_path (str)`: Ruta al metodo propuesto estructurado. Default `/proposed_method/test_solution_structured_content.json`.
-  - `legacy_method_path (str)`: Ruta al metodo legado estructurado. Default `/actual_method/test_solution_structured_content.json`.
   - `new_method_path (str)`: Ruta al metodo consolidado que sera modificado. Default `/new/new_method_final.json`.
   
   ## Salida y Efectos en el Estado
@@ -251,6 +254,7 @@ APPLY_METHOD_PATCH_TOOL_DESCRIPTION = """
 
 CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION = """
   Fusiona todos los parches individuales generados por `apply_method_patch` en un solo metodo final listo para renderizar.
+  Ademas, copia la metadata del metodo legado (tipo_metodo, nombre_producto, objetivo, alcance, definiciones, etc.) al metodo final.
   
   ## Cuando usar
   - Despues de aplicar todas las acciones con `apply_method_patch`.
@@ -259,11 +263,14 @@ CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION = """
   ## Parametros
   - `patches_dir (str)`: Directorio virtual donde se guardan los parches individuales. Default `/new/applied_changes`.
   - `base_method_path (str)`: Ruta al metodo base sobre el que se aplicaran los parches. Default `/new/new_method_final.json`.
+  - `legacy_metadata_path (str)`: Ruta al archivo de metadata del metodo legado. Default `/actual_method/method_metadata_TOC.json`.
   - `output_path (str)`: Ruta de salida del metodo consolidado. Default `/new/new_method_final.json`.
   
   ## Salida y Efectos en el Estado
-  - **Mensaje de Retorno (ToolMessage):** Resumen de parches leidos y aplicados.
-  - **Actualizacion del Estado:** Escribe el metodo consolidado en `output_path` con todos los cambios aplicados.
+  - **Mensaje de Retorno (ToolMessage):** Resumen de parches leidos, aplicados y campos de metadata copiados.
+  - **Actualizacion del Estado:** Escribe el metodo consolidado en `output_path` con:
+    - Metadata del metodo legado (apis, tipo_metodo, nombre_producto, numero_metodo, version_metodo, codigo_producto, objetivo, alcance_metodo, definiciones, recomendaciones_seguridad, materiales, equipos, anexos, autorizaciones, documentos_soporte, historico_cambios).
+    - Pruebas consolidadas con todos los cambios aplicados.
   
   ## Siguiente Paso Esperado
   - Revisar el metodo consolidado (si es necesario) y proceder con el renderizado o pasos de QA.
