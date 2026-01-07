@@ -273,5 +273,34 @@ CONSOLIDATE_NEW_METHOD_TOOL_DESCRIPTION = """
     - Pruebas consolidadas con todos los cambios aplicados.
   
   ## Siguiente Paso Esperado
-  - Revisar el metodo consolidado (si es necesario) y proceder con el renderizado o pasos de QA.
+  - Ejecutar `render_method_docx` para generar el documento DOCX final.
+  """
+
+RENDER_METHOD_DOCX_TOOL_DESCRIPTION = """
+  Renderiza el metodo analitico consolidado en un documento DOCX usando la plantilla corporativa.
+  Lee el metodo desde el filesystem virtual y genera un archivo .docx listo para revision o entrega.
+  
+  ## Cuando usar
+  - Despues de ejecutar `consolidate_new_method` exitosamente.
+  - Cuando el metodo final en `/new/new_method_final.json` este listo y validado.
+  - Como **ultimo paso** del flujo de implementacion de cambios.
+  
+  ## Rutas de Archivos
+  - **Metodo fuente:** `/new/new_method_final.json` (default, configurable via `method_path`).
+  - **Plantilla:** `src/template/Plantilla.docx` (default, configurable via `template_path`).
+  - **Directorio de salida:** `output/` (default, configurable via `output_dir`).
+  
+  ## Parametros
+  - `method_path (str)`: Ruta al metodo consolidado en el filesystem virtual. Default `/new/new_method_final.json`.
+  - `template_path (str)`: Ruta absoluta a la plantilla DOCX. Default usa `src/template/Plantilla.docx`.
+  - `output_dir (str)`: Directorio donde se guardara el documento generado. Default `output/`.
+  
+  ## Salida y Efectos en el Estado
+  - **Mensaje de Retorno (ToolMessage):** Resumen con nombre del producto, numero de metodo, cantidad de pruebas y ruta del archivo generado.
+  - **Actualizacion del Estado:** Registra la informacion del documento generado en `/new/rendered_docx_info.json`.
+  - **Archivo Fisico:** Genera el documento DOCX en el directorio de salida con formato `method_YYYYMMDD_HHMMSS.docx`.
+  
+  ## Siguiente Paso Esperado
+  - Informar al supervisor que el documento esta listo.
+  - El usuario puede abrir el archivo DOCX para revision final.
   """

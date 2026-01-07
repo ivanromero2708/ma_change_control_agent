@@ -190,8 +190,10 @@ vectorstores/
 
 src/output/
 
+output/
+
 src/images/
 
 notebooks/
 
-src/tests
+tests/
