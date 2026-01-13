@@ -49,30 +49,59 @@ def _clean_text(text: str) -> str:
 
 
 def _latex_to_text_general(text: str) -> str:
-    """Convierte expresiones LaTeX simples a texto plano legible en Word."""
+    """
+    Convierte LaTeX a texto matemático compatible con Word.
+    Soporta fracciones complejas/anidadas y normalización tipográfica.
+    """
     if not isinstance(text, str):
         return text
+
     out = text
+
+    # Fracciones anidadas: \frac{a}{b} -> (a/b)
     frac_pattern = re.compile(r"\\frac\{([^{}]+)\}\{([^{}]+)\}")
     while frac_pattern.search(out):
         out = frac_pattern.sub(r"(\1/\2)", out)
+
     replacements = [
         (r"\$", ""),
-        (r"\\mu", "u"),
+        (r"\\mu", "µ"),
         (r"\\mathrm\{\s*~?([^}]+)\s*\}", r"\1"),
         (r"\\%", "%"),
-        (r"\\times", "x"),
-        (r"\^\{\\circ\}", " deg"),
+        (r"\\times", "×"),
+        (r"\^\{\\circ\}", "°"),
         (r"\^\{([^}]+)\}", r"^\1"),
     ]
     for pattern, repl in replacements:
         out = re.sub(pattern, repl, out)
+
+    # Normalización básica
     out = re.sub(r"\s+", " ", out).strip()
     out = re.sub(r"\(\s+", "(", out)
     out = re.sub(r"\s+\)", ")", out)
     out = re.sub(r"\s*/\s*", "/", out)
     out = re.sub(r"(\d)\s+%", r"\1%", out)
+
+    # Normalización matemática general
+    out = re.sub(r"µ\s+g", "µg", out)
+    out = re.sub(r"m\s+g", "mg", out)
+    out = re.sub(r"n\s+g", "ng", out)
+    out = re.sub(r"m\s+L", "mL", out)
+    out = re.sub(r"\s*×\s*", "×", out)
     return out
+
+
+def _deep_latex_cleanup(obj: Any) -> Any:
+    """
+    Limpieza recursiva: aplica _latex_to_text_general a todos los strings.
+    """
+    if isinstance(obj, str):
+        return _latex_to_text_general(obj)
+    if isinstance(obj, list):
+        return [_deep_latex_cleanup(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _deep_latex_cleanup(v) for k, v in obj.items()}
+    return obj
 
 
 def _normalize_str(value: Any) -> str:
