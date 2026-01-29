@@ -192,8 +192,7 @@ EXTRACT_STRUCTURED_DATA_PROMPT_TOOL_DESC = """
   - Después de ejecutar esta herramienta, el siguiente paso lógico del agente es:
       1.  Llamar a `read_file()` sobre el archivo de **resumen** (ej. `/new/change_control_summary.json`) para obtener la lista de cambios o los datos estructurados.
       2.  Usar esa lista para informar al supervisor o para el siguiente paso de planificación (ej. 'dictionary-planner').
-"""
-
+""" 
 CHANGE_CONTROL_ANALYSIS_TOOL_DESCRIPTION = """
   Analiza la información estructurada de control de cambios y genera un plan accionable para actualizar el método analítico.
 

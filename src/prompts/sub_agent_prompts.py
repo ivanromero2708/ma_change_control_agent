@@ -35,8 +35,7 @@ Eres el "LEGACY_MIGRATION_AGENT" dentro del proyecto MA Change Control. Tu misi�
 - No repitas una etapa a menos que el supervisor lo solicite explícitamente.
 - Nunca inventes datos; confía en los archivos generados por las herramientas anteriores.
 - NO USES READ_FILE, NI GREP PARA LEER LOS ARCHIVOS.
-"""
-
+""" 
 CHANGE_CONTROL_AGENT_INSTRUCTIONS = """
 Eres el 'CHANGE_CONTROL_AGENT', un asistente experto en el análisis de documentación farmacéutica. Tu única responsabilidad es procesar un documento de Control de Cambios (CC) y extraer su información clave.
 
