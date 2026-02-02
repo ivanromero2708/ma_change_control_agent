@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -31,12 +31,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Rutas por defecto
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 METHOD_DEFAULT_PATH = "/new/new_method_final.json"
-TEMPLATE_DIR = Path(__file__).parent.parent / "template"
+TEMPLATE_DIR = PROJECT_ROOT / "src" / "template"
 TEMPLATE_ESP_PATH = TEMPLATE_DIR / "Plantilla_ESP.docx"
 TEMPLATE_EN_PATH = TEMPLATE_DIR / "Plantilla_EN.docx"
 LEGACY_TEMPLATE_PATH = TEMPLATE_DIR / "Plantilla.docx"
-OUTPUT_DEFAULT_DIR = Path(__file__).parent.parent.parent / "output"
+OUTPUT_DEFAULT_DIR = PROJECT_ROOT / "output"
 
 
 def _clean_text(text: str) -> str:
@@ -344,6 +345,38 @@ def _resolve_template_path(
         "Agrega Plantilla_ESP.docx o Plantilla_EN.docx o usa template_path."
     )
 
+
+def _resolve_output_directory(output_dir: Optional[str]) -> Path:
+    """
+    Normaliza el directorio de salida para evitar carpetas inesperadas.
+
+    - Sin argumento o vacío → usa `OUTPUT_DEFAULT_DIR` (output/ en el root).
+    - Ruta absoluta → se respeta.
+    - Ruta relativa que empieza por `output` → se ancla bajo `OUTPUT_DEFAULT_DIR`.
+    - Cualquier otra ruta relativa → se ignora y se usa `OUTPUT_DEFAULT_DIR`.
+    """
+    if not output_dir or str(output_dir).strip() == "":
+        return OUTPUT_DEFAULT_DIR
+
+    candidate = Path(output_dir)
+
+    if candidate.is_absolute():
+        return candidate
+
+    parts = list(candidate.parts)
+    if not parts:
+        return OUTPUT_DEFAULT_DIR
+
+    if parts[0].lower() == "output":
+        return OUTPUT_DEFAULT_DIR.joinpath(*parts[1:])
+
+    logger.warning(
+        "output_dir relativo '%s' detectado; se redirige a directorio por defecto: %s",
+        output_dir,
+        OUTPUT_DEFAULT_DIR,
+    )
+    return OUTPUT_DEFAULT_DIR
+
 def _build_method_context(method_data: Dict[str, Any]) -> Dict[str, Any]:
     """Arma el contexto para docxtpl a partir del nodo data del JSON."""
     method_data = _deep_latex_cleanup(method_data)
@@ -496,7 +529,8 @@ def render_method_docx(
         logger.error(msg)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
 
-    out_dir = Path(output_dir) if output_dir else OUTPUT_DEFAULT_DIR
+    out_dir = _resolve_output_directory(output_dir)
+    logger.info("Directorio de salida resuelto: %s", out_dir)
 
     # Construir contexto para la plantilla
     try:
